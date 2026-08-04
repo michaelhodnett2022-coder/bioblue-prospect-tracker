@@ -358,6 +358,45 @@ async function getOrCreateFolder(parentId, name) {
   catch (e) { delete _folderCache[key]; throw e; }
 }
 
+// One-time starter data — only ever used the moment the Drive file is first
+// created (i.e. genuinely zero prospects in the system yet). The other six
+// from the original working list (Patience Haulage, FLG, DTMT, Red Dust
+// Holdings, B & J Catalano, Dinos Transport) already have Prospect/Client
+// records, so they're intentionally excluded here.
+function getSeedProspects() {
+  const today = todayStr();
+  const plus7 = addDays(today, 7);
+  return [
+    { id: uid(), company:'Valley Transport', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
+      status:'New Lead', activity:[], nextFollowUp:null, lostReason:null, createdDate:today, promotedClientId:null },
+    { id: uid(), company:'Sands Refrigeration', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
+      status:'Quoted', activity:[
+        {date:today,type:'email',text:'Cold-call email sent'},
+        {date:today,type:'call',text:'Follow-up call made'},
+        {date:today,type:'note',text:'Quotes supplied, continue to follow-up'}
+      ], nextFollowUp:plus7, lostReason:null, createdDate:today, promotedClientId:null },
+    { id: uid(), company:'Fenix', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
+      status:'Contacted', activity:[
+        {date:today,type:'email',text:'Cold-call email sent'},
+        {date:today,type:'note',text:'Need to follow-up with phone call'}
+      ], nextFollowUp:plus7, lostReason:null, createdDate:today, promotedClientId:null },
+    { id: uid(), company:'McMan Bennett', state:'WA', contactName:'Michael McNeill', contactPhone:'', contactEmail:'',
+      status:'Engaged', activity:[
+        {date:today,type:'email',text:'Cold-call email sent'},
+        {date:today,type:'call',text:'Follow-up call made'},
+        {date:today,type:'note',text:'Follow-up with Michael McNeill on 17 August'}
+      ], nextFollowUp:'2026-08-17', lostReason:null, createdDate:today, promotedClientId:null },
+    { id: uid(), company:'Flexi Trans', state:'WA', contactName:'Darren', contactPhone:'', contactEmail:'',
+      status:'Contacted', activity:[
+        {date:today,type:'email',text:'Cold-call email sent'},
+        {date:today,type:'call',text:'Left one message for Darren'},
+        {date:today,type:'note',text:'Follow-up again'}
+      ], nextFollowUp:plus7, lostReason:null, createdDate:today, promotedClientId:null },
+    { id: uid(), company:'Swan Transit', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
+      status:'New Lead', activity:[], nextFollowUp:null, lostReason:null, createdDate:today, promotedClientId:null }
+  ];
+}
+
 async function getTrackerFileId() {
   if (trackerFileId) return trackerFileId;
   const rf = await fetch(
@@ -378,10 +417,12 @@ async function getTrackerFileId() {
   const fd = await fr.json();
   if (fd.files && fd.files.length) { trackerFileId = fd.files[0].id; return trackerFileId; }
 
-  // Not found — create fresh empty file
+  // Not found — create fresh file, seeded with the six starter prospects
+  // (see getSeedProspects above). This branch only ever runs once, the
+  // moment the file doesn't exist yet in Drive.
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify({ name: TRACKER_FILE_NAME, parents: [trackerId] })], { type: 'application/json' }));
-  form.append('file', new Blob(['[]'], { type: 'application/json' }));
+  form.append('file', new Blob([JSON.stringify(getSeedProspects())], { type: 'application/json' }));
   const cr = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
     method: 'POST', headers: { Authorization: `Bearer ${gdriveToken}` }, body: form
   });
