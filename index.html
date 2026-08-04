@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Prospect Tracker">
+<title>BioBlue Prospect Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy:#003466;--blue:#0055a5;--blue-bright:#0077cc;
+  --blue-light:#e8f2fb;--blue-pale:#f4f9ff;
+  --green:#00875a;--green-bright:#4ADE80;
+  --amber:#fbbf24;--coral:#fb923c;--red:#f87171;
+  --gray-dark:#2c3e50;--gray-mid:#6b7280;--gray-light:#e5e7eb;
+  --shadow:0 2px 12px rgba(0,52,102,0.10);
+  --radius:14px;--radius-sm:10px;
+}
+* { box-sizing:border-box;margin:0;padding:0; }
+body {
+  font-family:'DM Sans',sans-serif;
+  background:linear-gradient(160deg,#001f3f 0%,#003466 40%,#0055a5 100%);
+  min-height:100vh;color:white;
+  -webkit-font-smoothing:antialiased;
+}
+.page { max-width:560px;margin:0 auto;padding:32px 16px 60px;min-height:100vh; }
+.header { text-align:center;margin-bottom:24px; }
+.logo-wrap {
+  display:inline-flex;align-items:center;gap:10px;
+  background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);
+  border-radius:12px;padding:8px 16px;margin-bottom:16px;
+}
+.logo-text { font-family:'DM Mono',monospace;font-size:15px;font-weight:500;letter-spacing:2px;color:#a8d4f5; }
+.logo-dot { width:8px;height:8px;border-radius:50%;background:#64d2ff;box-shadow:0 0 8px #64d2ff; }
+.header h1 { font-size:24px;font-weight:700;letter-spacing:-0.5px;margin-bottom:4px; }
+.header p { font-size:13px;opacity:0.6;font-weight:300; }
+.back-link { display:inline-block;font-size:12px;color:#a8d4f5;opacity:0.7;margin-bottom:14px;text-decoration:none; }
+
+.auth-bar {
+  display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.08);
+  border:1px solid rgba(255,255,255,0.15);border-radius:var(--radius-sm);
+  padding:12px 14px;margin-bottom:18px;
+}
+.auth-status { flex:1;font-size:12px;color:rgba(255,255,255,0.65); }
+.btn {
+  font-family:'DM Sans',sans-serif;font-weight:700;font-size:12px;
+  border-radius:10px;padding:9px 14px;cursor:pointer;border:none;
+  white-space:nowrap;
+}
+.btn-primary { background:#64d2ff;color:#001f3f; }
+.btn-ghost { background:rgba(255,255,255,0.12);color:white;border:1px solid rgba(255,255,255,0.2); }
+
+/* NEW LEAD */
+.new-lead-card {
+  background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);
+  border-radius:var(--radius);padding:16px;margin-bottom:20px;
+}
+.new-lead-title {
+  font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
+  color:rgba(255,255,255,0.5);margin-bottom:12px;cursor:pointer;
+  display:flex;justify-content:space-between;align-items:center;
+}
+.new-lead-fields { display:none;flex-direction:column;gap:8px; }
+.new-lead-fields.open { display:flex; }
+.new-lead-fields input, .new-lead-fields select {
+  width:100%;padding:10px 12px;border-radius:10px;
+  border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);
+  color:white;font-family:'DM Sans',sans-serif;font-size:13px;
+}
+.new-lead-fields select option { background:#003466;color:white; }
+.new-lead-fields input::placeholder { color:rgba(255,255,255,0.4); }
+.new-lead-row { display:flex;gap:8px; }
+.new-lead-row > * { flex:1; }
+
+/* FILTER BAR */
+.filter-bar { display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap; }
+.filter-pill {
+  font-size:12px;font-weight:700;padding:7px 14px;border-radius:20px;
+  border:1.5px solid rgba(255,255,255,0.2);color:rgba(255,255,255,0.7);
+  cursor:pointer;background:transparent;
+}
+.filter-pill.active { background:#64d2ff;border-color:#64d2ff;color:#001f3f; }
+
+/* SECTION LABEL */
+.section-label {
+  font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
+  margin:22px 4px 10px;display:flex;align-items:center;gap:8px;
+}
+.section-count {
+  background:rgba(255,255,255,0.15);border-radius:10px;padding:1px 8px;font-size:10px;
+}
+.section-label.overdue { color:#f87171; }
+.section-label.today { color:#fbbf24; }
+.section-label.upcoming { color:#a8d4f5; }
+.section-label.nodate { color:rgba(255,255,255,0.45); }
+.section-label.lost { color:rgba(255,255,255,0.4);cursor:pointer;margin-top:32px; }
+.empty-note { font-size:12px;color:rgba(255,255,255,0.35);padding:4px 4px 8px;font-style:italic; }
+
+/* PROSPECT CARD */
+.p-card {
+  background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);
+  border-radius:var(--radius);padding:14px 16px;margin-bottom:10px;
+  position:relative;overflow:hidden;
+}
+.p-card::before {
+  content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:var(--accent,#64d2ff);
+}
+.p-card-top { display:flex;justify-content:space-between;align-items:flex-start;gap:10px;cursor:pointer; }
+.p-company { font-size:15px;font-weight:700; }
+.p-meta { font-size:11px;opacity:0.5;margin-top:2px; }
+.p-status-badge {
+  font-size:10px;font-weight:800;letter-spacing:0.4px;text-transform:uppercase;
+  padding:3px 9px;border-radius:10px;white-space:nowrap;
+  background:var(--accent,#64d2ff);color:#001f3f;
+}
+.p-followup { font-size:11px;margin-top:8px;font-weight:600; }
+.p-followup.overdue { color:#f87171; }
+.p-followup.today { color:#fbbf24; }
+.p-followup.upcoming { color:#a8d4f5; }
+
+.p-detail { display:none;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.1); }
+.p-detail.open { display:block; }
+.p-field-row { display:flex;gap:8px;margin-bottom:8px; }
+.p-field-row > * { flex:1; }
+.p-detail label {
+  display:block;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;
+  color:rgba(255,255,255,0.4);margin-bottom:4px;
+}
+.p-detail input, .p-detail select {
+  width:100%;padding:9px 10px;border-radius:8px;
+  border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);
+  color:white;font-family:'DM Sans',sans-serif;font-size:12.5px;
+}
+.p-detail select option { background:#003466;color:white; }
+.quick-actions { display:flex;gap:6px;flex-wrap:wrap;margin:10px 0; }
+.qa-btn {
+  font-size:11px;font-weight:700;padding:7px 11px;border-radius:8px;
+  border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);
+  color:white;cursor:pointer;
+}
+.qa-btn.promote { border-color:#4ADE80;color:#4ADE80; }
+.qa-btn.lost { border-color:#f87171;color:#f87171; }
+.activity-log { margin-top:10px;max-height:180px;overflow-y:auto; }
+.activity-entry {
+  font-size:11.5px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.06);
+  display:flex;gap:8px;
+}
+.activity-date { opacity:0.4;font-family:'DM Mono',monospace;font-size:10px;flex-shrink:0;width:64px; }
+.activity-text { flex:1;opacity:0.85; }
+.add-note-row { display:flex;gap:6px;margin-top:10px; }
+.add-note-row input {
+  flex:1;padding:8px 10px;border-radius:8px;font-size:12px;
+  border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:white;
+}
+
+/* LOST SECTION */
+.lost-wrap { display:none; }
+.lost-wrap.open { display:block; }
+.lost-reason-tag {
+  display:inline-block;font-size:10px;font-weight:700;color:#f87171;
+  background:rgba(248,113,113,0.12);border-radius:8px;padding:2px 8px;margin-top:6px;
+}
+
+/* MODAL: lost reason */
+.modal-overlay {
+  display:none;position:fixed;inset:0;background:rgba(0,15,30,0.6);
+  align-items:center;justify-content:center;z-index:200;padding:20px;
+}
+.modal-overlay.open { display:flex; }
+.modal-box {
+  background:#003466;border:1px solid rgba(255,255,255,0.2);border-radius:var(--radius);
+  padding:20px;max-width:340px;width:100%;
+}
+.modal-box h3 { font-size:15px;margin-bottom:12px; }
+.modal-box select {
+  width:100%;padding:10px 12px;border-radius:10px;margin-bottom:14px;
+  border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:white;font-size:13px;
+}
+.modal-box select option { background:#003466;color:white; }
+.modal-btn-row { display:flex;gap:8px; }
+.modal-btn-row .btn { flex:1; }
+
+.toast {
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+  background:#0a2a4a;border:1px solid rgba(255,255,255,0.2);
+  padding:10px 18px;border-radius:10px;font-size:12.5px;
+  opacity:0;transition:opacity 0.3s;z-index:300;pointer-events:none;max-width:90%;text-align:center;
+}
+.toast.show { opacity:1; }
+</style>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="page">
+
+<a class="back-link" href="https://michaelhodnett2022-coder.github.io/bioblue-field-tools">&larr; Field Tools Hub</a>
+
+<div class="header">
+  <div class="logo-wrap"><div class="logo-dot"></div><div class="logo-text">BIOBLUE</div></div>
+  <h1>Prospect Tracker</h1>
+  <p>Cold-call lead tracking · WA &amp; NT</p>
+</div>
+
+<div class="auth-bar">
+  <div class="auth-status" id="authStatus">Tap Load to fetch your prospects</div>
+  <button class="btn btn-primary" onclick="loadTracker()">&#9729;&#65039; Load</button>
+</div>
+
+<div class="new-lead-card">
+  <div class="new-lead-title" id="newLeadToggle" onclick="toggleNewLead()">
+    <span>+ Add new lead</span><span id="newLeadChevron">&#9662;</span>
+  </div>
+  <div class="new-lead-fields" id="newLeadFields">
+    <input type="text" id="nlCompany" placeholder="Company name">
+    <div class="new-lead-row">
+      <select id="nlState">
+        <option value="WA">WA</option>
+        <option value="NT">NT</option>
+      </select>
+      <input type="text" id="nlContactName" placeholder="Contact name (optional)">
+    </div>
+    <div class="new-lead-row">
+      <input type="text" id="nlContactPhone" placeholder="Phone (optional)">
+      <input type="text" id="nlContactEmail" placeholder="Email (optional)">
+    </div>
+    <button class="btn btn-primary" style="margin-top:4px;" onclick="addNewLead()">Add lead</button>
+  </div>
+</div>
+
+<div class="filter-bar">
+  <button class="filter-pill active" data-state="ALL" onclick="setStateFilter('ALL')">All</button>
+  <button class="filter-pill" data-state="WA" onclick="setStateFilter('WA')">WA</button>
+  <button class="filter-pill" data-state="NT" onclick="setStateFilter('NT')">NT</button>
+</div>
+
+<div id="dashboard"></div>
+
+<div class="section-label lost" id="lostToggle" onclick="toggleLostSection()">
+  <span id="lostChevron">&#9656;</span> Lost <span class="section-count" id="lostCount">0</span>
+</div>
+<div class="lost-wrap" id="lostWrap"></div>
+
+</div>
+
+<div class="modal-overlay" id="lostModal">
+  <div class="modal-box">
+    <h3>Mark as Lost</h3>
+    <select id="lostReasonSelect">
+      <option value="">Select a reason...</option>
+      <option value="Price">Price</option>
+      <option value="Went with competitor">Went with competitor</option>
+      <option value="No current need">No current need</option>
+      <option value="Unresponsive">Unresponsive</option>
+      <option value="Bad timing">Bad timing</option>
+      <option value="Other">Other</option>
+    </select>
+    <div class="modal-btn-row">
+      <button class="btn btn-ghost" onclick="closeLostModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmMarkLost()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// =====================================================================
+// CONSTANTS — must match every other Field Tools form exactly
+// =====================================================================
+const GDRIVE_CLIENT_ID   = '49055725643-mlnqu8l92vmau83rnrk8imupiqvs03t1.apps.googleusercontent.com';
+const GDRIVE_FOLDER_NAME = 'BioBlue Audits';
+const TRACKER_SUBFOLDER  = 'Prospect Tracker Data';
+const TRACKER_FILE_NAME  = 'BB_Prospect_Tracker.json';
+const PROSPECT_FORM_URL  = 'https://michaelhodnett2022-coder.github.io/bioblue-prospect';
+
+const STATUS_ORDER  = ['New Lead','Contacted','Engaged','Quoted','Negotiating','Won','Lost'];
+const STATUS_COLORS = {
+  'New Lead':'#94a3b8','Contacted':'#38bdf8','Engaged':'#4ADE80',
+  'Quoted':'#fbbf24','Negotiating':'#fb923c','Won':'#22c55e','Lost':'#f87171'
+};
+
+let gdriveToken = null;
+let trackerFileId = null;
+let prospects = [];
+let stateFilter = 'ALL';
+let saveInFlight = false;
+let saveQueued = false;
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+function todayStr() { return new Date().toISOString().slice(0,10); }
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0,10);
+}
+function fmtDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-AU', { day:'numeric', month:'short' });
+}
+function uid() { return 'PT-' + Date.now() + '-' + Math.random().toString(36).slice(2,7); }
+
+// =====================================================================
+// AUTH + LOAD
+// =====================================================================
+function setAuthStatus(msg) { document.getElementById('authStatus').textContent = msg; }
+
+async function ensureToken() {
+  if (gdriveToken) return;
+  await new Promise((resolve, reject) => {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: GDRIVE_CLIENT_ID,
+      scope: 'https://www.googleapis.com/auth/drive.file',
+      callback: r => {
+        if (r.access_token) { gdriveToken = r.access_token; resolve(); }
+        else reject(new Error(r.error || 'Sign-in failed'));
+      },
+      error_callback: e => reject(new Error(e.message || 'Sign-in failed'))
+    });
+    client.requestAccessToken({ prompt: '' });
+  });
+}
+
+// Same in-flight-promise-caching pattern used across every other Field
+// Tools form's getOrCreateClientFolder, to avoid the duplicate-folder race
+// condition already fixed elsewhere in the suite.
+const _folderCache = {};
+async function getOrCreateFolder(parentId, name) {
+  const key = parentId + '::' + name;
+  if (_folderCache[key]) return _folderCache[key];
+  _folderCache[key] = (async () => {
+    const sr = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name='${name.replace(/'/g,"\\'")}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`)}&fields=files(id)`,
+      { headers: { Authorization: `Bearer ${gdriveToken}` } }
+    );
+    if (!sr.ok) throw new Error(`Folder search failed (${sr.status})`);
+    const sd = await sr.json();
+    if (sd.files && sd.files.length) return sd.files[0].id;
+    const cr = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
+    });
+    if (!cr.ok) throw new Error(`Folder creation failed (${cr.status})`);
+    const created = await cr.json();
+    if (!created.id) throw new Error('Folder creation returned no ID');
+    return created.id;
+  })();
+  try { return await _folderCache[key]; }
+  catch (e) { delete _folderCache[key]; throw e; }
+}
+
+async function getTrackerFileId() {
+  if (trackerFileId) return trackerFileId;
+  const rf = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id)`,
+    { headers: { Authorization: `Bearer ${gdriveToken}` } }
+  );
+  const rd = await rf.json();
+  if (!rd.files || !rd.files.length) throw new Error('BioBlue Audits folder not found');
+  const rootId = rd.files[0].id;
+
+  const adminId   = await getOrCreateFolder(rootId, 'ADMIN DATA - DO NOT REMOVE');
+  const trackerId = await getOrCreateFolder(adminId, TRACKER_SUBFOLDER);
+
+  const fr = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name='${TRACKER_FILE_NAME}' and '${trackerId}' in parents and trashed=false&fields=files(id)`,
+    { headers: { Authorization: `Bearer ${gdriveToken}` } }
+  );
+  const fd = await fr.json();
+  if (fd.files && fd.files.length) { trackerFileId = fd.files[0].id; return trackerFileId; }
+
+  // Not found — create fresh empty file
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify({ name: TRACKER_FILE_NAME, parents: [trackerId] })], { type: 'application/json' }));
+  form.append('file', new Blob(['[]'], { type: 'application/json' }));
+  const cr = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+    method: 'POST', headers: { Authorization: `Bearer ${gdriveToken}` }, body: form
+  });
+  const cd = await cr.json();
+  trackerFileId = cd.id;
+  return trackerFileId;
+}
+
+async function loadTracker() {
+  setAuthStatus('\uD83D\uDD10 Connecting to Google...');
+  try {
+    await ensureToken();
+    setAuthStatus('\uD83D\uDCC2 Fetching prospects...');
+    const fileId = await getTrackerFileId();
+    const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+    const text = await dl.text();
+    prospects = text.trim() ? JSON.parse(text) : [];
+    setAuthStatus(`\u2705 ${prospects.length} prospect${prospects.length!==1?'s':''} loaded`);
+    render();
+  } catch (e) {
+    gdriveToken = null;
+    setAuthStatus('\u274C ' + e.message);
+  }
+}
+
+async function saveTracker() {
+  if (!gdriveToken || !trackerFileId) { showToast('Tap Load first to connect'); return; }
+  // Coalesce rapid successive saves (e.g. two quick taps) into one write —
+  // last state always wins, matches the documented storage limitation.
+  if (saveInFlight) { saveQueued = true; return; }
+  saveInFlight = true;
+  try {
+    const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${trackerFileId}?uploadType=media`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(prospects)
+    });
+    if (!res.ok) throw new Error('Save failed (' + res.status + ')');
+  } catch (e) {
+    showToast('\u26A0\uFE0F Save failed — ' + e.message);
+  } finally {
+    saveInFlight = false;
+    if (saveQueued) { saveQueued = false; saveTracker(); }
+  }
+}
+
+// =====================================================================
+// NEW LEAD
+// =====================================================================
+function toggleNewLead() {
+  document.getElementById('newLeadFields').classList.toggle('open');
+  const open = document.getElementById('newLeadFields').classList.contains('open');
+  document.getElementById('newLeadChevron').textContent = open ? '\u2303' : '\u2325';
+}
+
+function addNewLead() {
+  const company = document.getElementById('nlCompany').value.trim();
+  if (!company) { showToast('Company name is required'); return; }
+  const p = {
+    id: uid(),
+    company,
+    state: document.getElementById('nlState').value,
+    contactName: document.getElementById('nlContactName').value.trim(),
+    contactPhone: document.getElementById('nlContactPhone').value.trim(),
+    contactEmail: document.getElementById('nlContactEmail').value.trim(),
+    status: 'New Lead',
+    activity: [],
+    nextFollowUp: null,
+    lostReason: null,
+    createdDate: todayStr(),
+    promotedClientId: null
+  };
+  prospects.unshift(p);
+  ['nlCompany','nlContactName','nlContactPhone','nlContactEmail'].forEach(id => document.getElementById(id).value = '');
+  saveTracker();
+  render();
+  showToast('Lead added — ' + company);
+}
+
+// =====================================================================
+// ACTIVITY / STATUS / FOLLOW-UP
+// =====================================================================
+function findProspect(id) { return prospects.find(p => p.id === id); }
+
+function logActivity(id, type, text) {
+  const p = findProspect(id);
+  if (!p) return;
+  p.activity.push({ date: todayStr(), type, text });
+  // Bump New Lead -> Contacted automatically on first real activity.
+  if (p.status === 'New Lead' && (type === 'email' || type === 'call')) p.status = 'Contacted';
+  // Suggest next follow-up 7 days out unless one is already set in the future.
+  const suggested = addDays(todayStr(), 7);
+  if (!p.nextFollowUp || p.nextFollowUp < todayStr()) p.nextFollowUp = suggested;
+  saveTracker();
+  render();
+}
+
+function quickLogCall(id)  { logActivity(id, 'call',  'Follow-up call made'); }
+function quickLogEmail(id) { logActivity(id, 'email', 'Cold-call email sent'); }
+
+function addNote(id, inputEl) {
+  const text = inputEl.value.trim();
+  if (!text) return;
+  logActivity(id, 'note', text);
+  inputEl.value = '';
+}
+
+function changeStatus(id, newStatus) {
+  const p = findProspect(id);
+  if (!p) return;
+  if (newStatus === 'Lost') { openLostModal(id); return; }
+  p.status = newStatus;
+  saveTracker();
+  render();
+}
+
+function updateFollowUp(id, dateVal) {
+  const p = findProspect(id);
+  if (!p) return;
+  p.nextFollowUp = dateVal || null;
+  saveTracker();
+}
+
+// =====================================================================
+// LOST FLOW
+// =====================================================================
+let _lostTargetId = null;
+function openLostModal(id) {
+  _lostTargetId = id;
+  document.getElementById('lostReasonSelect').value = '';
+  document.getElementById('lostModal').classList.add('open');
+}
+function closeLostModal() {
+  _lostTargetId = null;
+  document.getElementById('lostModal').classList.remove('open');
+}
+function confirmMarkLost() {
+  const reason = document.getElementById('lostReasonSelect').value;
+  if (!reason) { showToast('Select a reason first'); return; }
+  const p = findProspect(_lostTargetId);
+  if (p) {
+    p.status = 'Lost';
+    p.lostReason = reason;
+    p.lostDate = todayStr();
+    saveTracker();
+  }
+  closeLostModal();
+  render();
+}
+
+// =====================================================================
+// PROMOTE TO CLIENT
+// =====================================================================
+function promoteToClient(id) {
+  const p = findProspect(id);
+  if (!p) return;
+  const params = new URLSearchParams({
+    promote: '1',
+    company: p.company || '',
+    contactName: p.contactName || '',
+    contactPhone: p.contactPhone || '',
+    contactEmail: p.contactEmail || '',
+    state: p.state || '',
+    trackerId: p.id
+  });
+  window.location.href = `${PROSPECT_FORM_URL}/?${params.toString()}`;
+}
+
+// =====================================================================
+// RENDER
+// =====================================================================
+function setStateFilter(s) {
+  stateFilter = s;
+  document.querySelectorAll('.filter-pill').forEach(el => el.classList.toggle('active', el.dataset.state === s));
+  render();
+}
+
+function toggleCard(id) {
+  const el = document.getElementById('detail-' + id);
+  if (el) el.classList.toggle('open');
+}
+
+function toggleLostSection() {
+  document.getElementById('lostWrap').classList.toggle('open');
+  const open = document.getElementById('lostWrap').classList.contains('open');
+  document.getElementById('lostChevron').textContent = open ? '\u25BE' : '\u25B8';
+}
+
+function bucketFor(p) {
+  if (!p.nextFollowUp) return 'nodate';
+  if (p.nextFollowUp < todayStr()) return 'overdue';
+  if (p.nextFollowUp === todayStr()) return 'today';
+  return 'upcoming';
+}
+
+function statusOptionsHtml(current) {
+  return STATUS_ORDER.map(s => `<option value="${s}" ${s===current?'selected':''}>${s}</option>`).join('');
+}
+
+function cardHtml(p) {
+  const accent = STATUS_COLORS[p.status] || '#64d2ff';
+  const bucket = bucketFor(p);
+  const followUpClass = bucket === 'overdue' ? 'overdue' : bucket === 'today' ? 'today' : 'upcoming';
+  const followUpLabel = p.nextFollowUp
+    ? (bucket === 'overdue' ? 'Overdue — was due ' : bucket === 'today' ? 'Due today' : 'Due ') + (bucket !== 'today' ? fmtDate(p.nextFollowUp) : '')
+    : 'No follow-up set';
+  const activityHtml = (p.activity || []).slice().reverse().map(a => `
+    <div class="activity-entry">
+      <div class="activity-date">${fmtDate(a.date)}</div>
+      <div class="activity-text">${escapeHtml(a.text)}</div>
+    </div>`).join('') || '<div class="empty-note">No activity logged yet</div>';
+
+  return `
+  <div class="p-card" style="--accent:${accent};">
+    <div class="p-card-top" onclick="toggleCard('${p.id}')">
+      <div>
+        <div class="p-company">${escapeHtml(p.company)}</div>
+        <div class="p-meta">${p.state}${p.contactName ? ' · ' + escapeHtml(p.contactName) : ''}</div>
+        <div class="p-followup ${followUpClass}">${followUpLabel}</div>
+      </div>
+      <div class="p-status-badge">${p.status}</div>
+    </div>
+    <div class="p-detail" id="detail-${p.id}">
+      <div class="p-field-row">
+        <div>
+          <label>Status</label>
+          <select onchange="changeStatus('${p.id}', this.value)">${statusOptionsHtml(p.status)}</select>
+        </div>
+        <div>
+          <label>Next follow-up</label>
+          <input type="date" value="${p.nextFollowUp || ''}" onchange="updateFollowUp('${p.id}', this.value)">
+        </div>
+      </div>
+      <div class="quick-actions">
+        <button class="qa-btn" onclick="quickLogCall('${p.id}')">\u260E\uFE0F Call made</button>
+        <button class="qa-btn" onclick="quickLogEmail('${p.id}')">\u2709\uFE0F Email sent</button>
+        <button class="qa-btn promote" onclick="promoteToClient('${p.id}')">\u2192 Promote to client</button>
+        <button class="qa-btn lost" onclick="openLostModal('${p.id}')">Mark lost</button>
+      </div>
+      <div class="activity-log">${activityHtml}</div>
+      <div class="add-note-row">
+        <input type="text" placeholder="Add a note..." onkeydown="if(event.key==='Enter'){addNote('${p.id}', this);}">
+        <button class="btn btn-ghost" onclick="addNote('${p.id}', this.previousElementSibling)">Add</button>
+      </div>
+      ${p.lostReason ? `<div class="lost-reason-tag">Lost — ${escapeHtml(p.lostReason)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function escapeHtml(s) {
+  return (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function render() {
+  const visible = prospects.filter(p => stateFilter === 'ALL' || p.state === stateFilter);
+  const active = visible.filter(p => p.status !== 'Lost');
+  const lost   = visible.filter(p => p.status === 'Lost');
+
+  const overdue  = active.filter(p => bucketFor(p) === 'overdue');
+  const today    = active.filter(p => bucketFor(p) === 'today');
+  const upcoming = active.filter(p => bucketFor(p) === 'upcoming').sort((a,b) => a.nextFollowUp.localeCompare(b.nextFollowUp));
+  const nodate   = active.filter(p => bucketFor(p) === 'nodate');
+
+  const section = (label, cls, list) => {
+    if (!list.length) return '';
+    return `<div class="section-label ${cls}">${label} <span class="section-count">${list.length}</span></div>` +
+           list.map(cardHtml).join('');
+  };
+
+  const dash = document.getElementById('dashboard');
+  const html = section('Overdue','overdue',overdue) + section('Due today','today',today) +
+               section('Upcoming','upcoming',upcoming) + section('No follow-up set','nodate',nodate);
+  dash.innerHTML = html || '<div class="empty-note">No active prospects yet — add one above, or tap Load if you already have some in Drive.</div>';
+
+  document.getElementById('lostCount').textContent = lost.length;
+  document.getElementById('lostWrap').innerHTML = lost.length
+    ? lost.map(cardHtml).join('')
+    : '<div class="empty-note">Nothing marked lost yet</div>';
+}
+
+render();
+</script>
+</body>
+</html>
