@@ -74,6 +74,14 @@ body {
 .new-lead-row { display:flex;gap:8px; }
 .new-lead-row > * { flex:1; }
 
+.search-wrap { margin-bottom:14px; }
+.search-wrap input {
+  width:100%;padding:12px 14px;border-radius:10px;
+  border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);
+  color:white;font-family:'DM Sans',sans-serif;font-size:14px;
+}
+.search-wrap input::placeholder { color:rgba(255,255,255,0.4); }
+
 /* FILTER BAR */
 .filter-bar { display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap; }
 .filter-pill {
@@ -230,6 +238,10 @@ body {
   </div>
 </div>
 
+<div class="search-wrap">
+  <input type="text" id="searchBox" placeholder="Search prospects by company or contact..." oninput="setSearchFilter(this.value)" autocomplete="off">
+</div>
+
 <div class="filter-bar">
   <button class="filter-pill active" data-state="ALL" onclick="setStateFilter('ALL')">All</button>
   <button class="filter-pill" data-state="WA" onclick="setStateFilter('WA')">WA</button>
@@ -286,6 +298,7 @@ let gdriveToken = null;
 let trackerFileId = null;
 let prospects = [];
 let stateFilter = 'ALL';
+let searchFilter = '';
 let saveInFlight = false;
 let saveQueued = false;
 
@@ -600,6 +613,11 @@ function setStateFilter(s) {
   render();
 }
 
+function setSearchFilter(v) {
+  searchFilter = (v || '').trim().toLowerCase();
+  render();
+}
+
 function toggleCard(id) {
   const el = document.getElementById('detail-' + id);
   if (el) el.classList.toggle('open');
@@ -677,7 +695,14 @@ function escapeHtml(s) {
 }
 
 function render() {
-  const visible = prospects.filter(p => stateFilter === 'ALL' || p.state === stateFilter);
+  const visible = prospects.filter(p => {
+    if (stateFilter !== 'ALL' && p.state !== stateFilter) return false;
+    if (searchFilter) {
+      const haystack = (p.company + ' ' + (p.contactName || '')).toLowerCase();
+      if (!haystack.includes(searchFilter)) return false;
+    }
+    return true;
+  });
   const active = visible.filter(p => p.status !== 'Lost');
   const lost   = visible.filter(p => p.status === 'Lost');
 
