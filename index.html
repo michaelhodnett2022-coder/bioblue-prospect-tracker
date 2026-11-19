@@ -260,7 +260,8 @@ body {
 </div>
 
 <div class="tool-links">
-  <span onclick="document.getElementById('researchFileInput').click()">&#8679; Import research</span>
+  <span onclick="openPasteResearch()">&#128203; Paste research</span>
+  <span onclick="document.getElementById('researchFileInput').click()">&#8679; Import research file</span>
   <span onclick="openExclusionList()">Copy exclusion list for research</span>
   <input type="file" id="researchFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importResearchFile(this)">
 </div>
@@ -322,6 +323,18 @@ body {
 </div>
 <div class="lost-wrap" id="lostWrap"></div>
 
+</div>
+
+<div class="modal-overlay" id="pasteModal">
+  <div class="modal-box" style="max-width:440px;">
+    <h3>Paste research</h3>
+    <div style="font-size:11.5px;opacity:0.7;margin-bottom:10px;">Open the Tracker Import sheet, set IMPORT to N for any you don't want, select all (Ctrl+A), copy (Ctrl+C) and paste here. Include the header row.</div>
+    <textarea id="pasteText" placeholder="Paste here..." style="width:100%;height:200px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:white;font-family:'DM Mono',monospace;font-size:11px;padding:8px;"></textarea>
+    <div class="modal-btn-row" style="margin-top:12px;">
+      <button class="btn btn-ghost" onclick="closePasteResearch()">Cancel</button>
+      <button class="btn btn-primary" onclick="importPastedResearch()">Import</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal-overlay" id="exclusionModal">
@@ -1148,12 +1161,21 @@ async function importResearchFile(input) {
   input.value = '';   // so picking the same file again still fires
   if (!file) return;
   try {
-    const ok = await ensureConnected();   // merge the latest Drive copy first, so duplicate checks are current
-    if (!ok) throw new Error('Could not connect to Drive');
     const wb = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array' });
     const sheetName = wb.SheetNames.includes(IMPORT_SHEET) ? IMPORT_SHEET : wb.SheetNames[0];
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
-    if (!rows.length) { alert(`No rows found in "${sheetName}". Nothing was imported.`); return; }
+    await importResearchRows(rows, `"${sheetName}"`);
+  } catch (e) {
+    alert('Import stopped — ' + e.message + '\n\nNothing was changed.');
+  }
+}
+
+// Shared by the file import and the paste import: rows = objects keyed by
+// the header row. Returns true when leads were saved.
+async function importResearchRows(rows, sourceLabel) {
+    const ok = await ensureConnected();   // merge the latest Drive copy first, so duplicate checks are current
+    if (!ok) throw new Error('Could not connect to Drive');
+    if (!rows.length) { alert(`No rows found in ${sourceLabel}. Nothing was imported.`); return false; }
     const hasImportCol = Object.keys(rows[0]).some(h => normKey(h) === 'import');
 
     const existing = new Map(prospects.map(p => [leadKey(p.company, p.suburb), p]));
@@ -1173,12 +1195,12 @@ async function importResearchFile(input) {
     });
 
     if (!kept.length && !thrown.length) {
-      alert(`Nothing new to import from "${sheetName}".` + (skipped.length ? `\n\nSkipped ${skipped.length}:\n${skipped.slice(0, 10).join('\n')}` : ''));
-      return;
+      alert(`Nothing new to import from ${sourceLabel}.` + (skipped.length ? `\n\nSkipped ${skipped.length}:\n${skipped.slice(0, 10).join('\n')}` : ''));
+      return false;
     }
     const noState = kept.filter(p => !p.state).length;
     const msg =
-      `From "${sheetName}", assigned to ${currentBDM}:\n\n` +
+      `From ${sourceLabel}, assigned to ${currentBDM}:\n\n` +
       `• Import as Cold leads (Y): ${kept.length}\n` +
       `• Not imported, kept out of future research (N): ${thrown.length}\n` +
       (skipped.length ? `• Skipped, already known: ${skipped.length}\n   ${skipped.slice(0, 6).join('\n   ')}${skipped.length > 6 ? `\n   ...and ${skipped.length - 6} more` : ''}\n` : '') +
@@ -1186,16 +1208,69 @@ async function importResearchFile(input) {
       (noState ? `\n${noState} kept lead(s) have no valid state — set it on the card.\n` : '') +
       (!hasImportCol ? `\nNo IMPORT column found — every row will be imported.\n` : '') +
       `\nGo ahead?`;
-    if (!confirm(msg)) { showToast('Import cancelled — nothing changed'); return; }
+    if (!confirm(msg)) { showToast('Import cancelled — nothing changed'); return false; }
 
     const added = [...kept, ...thrown];
     prospects = [...added, ...prospects];
     const saved = await saveTracker();
-    if (!saved) { prospects = prospects.filter(p => !added.includes(p)); render(); alert('Import could not be saved to Drive, so nothing was changed. Tap Load and try again.'); return; }
+    if (!saved) { prospects = prospects.filter(p => !added.includes(p)); render(); alert('Import could not be saved to Drive, so nothing was changed. Tap Load and try again.'); return false; }
     if (kept.length) setViewMode('cold'); else render();
     // Place the new leads on the map now, at the desk, so Near me works straight away in the field.
     if (kept.length) geocodeMissing(kept).then(n => { if (n) saveTracker(); }).catch(() => {});
     showToast(`✅ ${kept.length} lead${kept.length !== 1 ? 's' : ''} added to Cold`);
+    return true;
+}
+
+// PASTE RESEARCH — rows copied from Google Sheets / Excel arrive as
+// tab-separated text (cells holding line breaks or tabs come wrapped in
+// quotes); a CSV paste is handled too. Header row required.
+function parseDelimited(text) {
+  const firstLine = text.split(/\r?\n/, 1)[0] || '';
+  const delim = firstLine.includes('\t') ? '\t' : ',';
+  const rows = [];
+  let row = [], cell = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cell += '"'; i++; } else inQuotes = false;
+      } else cell += ch;
+    } else if (ch === '"' && cell === '') {
+      inQuotes = true;
+    } else if (ch === delim) {
+      row.push(cell); cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += ch;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  const nonEmpty = rows.filter(r => r.some(c => c.trim() !== ''));
+  if (nonEmpty.length < 2) return [];
+  const headers = nonEmpty[0].map(h => h.trim());
+  return nonEmpty.slice(1).map(r => {
+    const o = {};
+    headers.forEach((h, idx) => { if (h) o[h] = (r[idx] || '').trim(); });
+    return o;
+  });
+}
+
+function openPasteResearch() {
+  document.getElementById('pasteText').value = '';
+  document.getElementById('pasteModal').classList.add('open');
+}
+function closePasteResearch() { document.getElementById('pasteModal').classList.remove('open'); }
+
+async function importPastedResearch() {
+  const text = document.getElementById('pasteText').value;
+  if (!text.trim()) { showToast('Paste the sheet first'); return; }
+  const rows = parseDelimited(text);
+  if (!rows.length) { alert('Could not read that paste — make sure you copied the header row and at least one lead.'); return; }
+  const headerKeys = Object.keys(rows[0]).map(normKey);
+  if (!headerKeys.includes('company')) { alert('No "Company" column found — copy the whole Tracker Import sheet, including the header row.'); return; }
+  try {
+    const done = await importResearchRows(rows, 'your paste');
+    if (done) closePasteResearch();
   } catch (e) {
     alert('Import stopped — ' + e.message + '\n\nNothing was changed.');
   }
