@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -128,6 +131,7 @@ body {
 .p-followup.overdue { color:#f87171; }
 .p-followup.today { color:#fbbf24; }
 .p-followup.upcoming { color:#a8d4f5; }
+.p-followup.nodate { color:rgba(255,255,255,0.4); }
 
 .p-detail { display:none;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.1); }
 .p-detail.open { display:block; }
@@ -199,10 +203,14 @@ body {
 }
 .toast.show { opacity:1; }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 <div class="page">
+
+<button onclick="forceRefresh()" title="Force refresh to the latest version"
+  style="position:fixed;top:12px;right:12px;z-index:50;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:white;font-size:17px;cursor:pointer;">&#8635;</button>
 
 <a class="back-link" href="https://michaelhodnett2022-coder.github.io/bioblue-field-tools">&larr; Field Tools Hub</a>
 
@@ -213,8 +221,27 @@ body {
 </div>
 
 <div class="auth-bar">
-  <div class="auth-status" id="authStatus">Tap Load to fetch your prospects</div>
+  <div class="auth-status" id="authStatus">Tap Load to see prospects already in Drive</div>
+  <button class="btn btn-ghost" onclick="manualSave()">&#128190; Save</button>
   <button class="btn btn-primary" onclick="loadTracker()">&#9729;&#65039; Load</button>
+</div>
+<div id="saveStatus" style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;padding:6px 4px 14px;color:rgba(255,255,255,0.4);">
+  <span id="saveStatusDot" style="width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,0.3);flex-shrink:0;"></span>
+  <span id="saveStatusText">Not connected yet &mdash; will connect automatically on your first edit</span>
+</div>
+
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+  <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);white-space:nowrap;">Acting as</label>
+  <select id="actingAsBDM" onchange="setCurrentBDM(this.value)" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:white;font-family:'DM Sans',sans-serif;font-size:12.5px;">
+  </select>
+</div>
+
+<div style="text-align:center;margin-bottom:16px;">
+  <span onclick="openImportPicker()" style="font-size:11px;color:rgba(255,255,255,0.45);text-decoration:underline;cursor:pointer;">Import existing Prospect/Client records</span>
+  <span onclick="resyncAllToClientRecords()" style="font-size:11px;color:rgba(255,255,255,0.45);text-decoration:underline;cursor:pointer;margin-left:14px;">Resync all to Client Records</span>
+  <div id="migrateFromTestWrap" style="display:none;margin-top:10px;">
+    <span onclick="migrateFromTest()" style="font-size:11px;color:#fbbf24;text-decoration:underline;cursor:pointer;">Migrate leads from TEST (one-off)</span>
+  </div>
 </div>
 
 <div class="new-lead-card">
@@ -246,7 +273,12 @@ body {
   <button class="filter-pill active" data-state="ALL" onclick="setStateFilter('ALL')">All</button>
   <button class="filter-pill" data-state="WA" onclick="setStateFilter('WA')">WA</button>
   <button class="filter-pill" data-state="NT" onclick="setStateFilter('NT')">NT</button>
+  <select id="bdmFilterSelect" onchange="setBdmFilter(this.value)" style="padding:6px 10px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.7);font-size:12px;font-weight:700;font-family:'DM Sans',sans-serif;">
+    <option value="ALL">All BDMs</option>
+  </select>
 </div>
+
+<div class="filter-bar" id="stageStrip"></div>
 
 <div id="dashboard"></div>
 
@@ -276,6 +308,23 @@ body {
   </div>
 </div>
 
+<div class="modal-overlay" id="importModal">
+  <div class="modal-box" style="max-width:440px;max-height:82vh;display:flex;flex-direction:column;">
+    <h3>Import from production</h3>
+    <input type="text" id="importSearchInput" placeholder="Search by company name..." oninput="setImportSearch(this.value)"
+      style="width:100%;padding:9px 10px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:white;font-size:12.5px;margin-bottom:10px;font-family:'DM Sans',sans-serif;">
+    <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:6px;display:flex;justify-content:space-between;">
+      <span id="importCandidateCount">Loading...</span>
+      <span onclick="toggleSelectAllImport()" style="text-decoration:underline;cursor:pointer;">Select all shown</span>
+    </div>
+    <div id="importList" style="overflow-y:auto;flex:1;min-height:120px;max-height:340px;border-top:1px solid rgba(255,255,255,0.1);"></div>
+    <div class="modal-btn-row" style="margin-top:12px;">
+      <button class="btn btn-ghost" onclick="closeImportPicker()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmImportSelected()" id="importConfirmBtn">Import selected (0)</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -287,6 +336,11 @@ const GDRIVE_FOLDER_NAME = 'BioBlue Audits';
 const TRACKER_SUBFOLDER  = 'Prospect Tracker Data';
 const TRACKER_FILE_NAME  = 'BB_Prospect_Tracker.json';
 const PROSPECT_FORM_URL  = 'https://michaelhodnett2022-coder.github.io/bioblue-prospect';
+const QUOTE_BUILDER_URL  = 'https://michaelhodnett2022-coder.github.io/bioblue-quote';
+const PROSPECTS_FOLDER   = 'Prospects';
+const CLIENTS_FOLDER     = 'Clients';
+const LOST_FOLDER        = 'Lost';
+const CLIENT_RECORDS_NAME= 'BioBlue_Client_Records.xlsx';
 
 const STATUS_ORDER  = ['New Lead','Contacted','Engaged','Quoted','Negotiating','Won','Lost'];
 const STATUS_COLORS = {
@@ -294,11 +348,29 @@ const STATUS_COLORS = {
   'Quoted':'#fbbf24','Negotiating':'#fb923c','Won':'#22c55e','Lost':'#f87171'
 };
 
+// Same roster, names, and emails already used across the rest of the suite
+// (Quote Builder etc.) — kept identical so BDM values written here match
+// exactly what those forms expect, no remapping needed anywhere downstream.
+const BDM_EMAILS = {
+  'Michael Hodnett': 'michael.hodnett@bioblue.com.au',
+  'Derek Page':       'derek.page@bioblue.com.au',
+  'Angelo Sayas':     'angelo.sayas@bioblue.com.au',
+  'Kevin Goverd':      'kevin.goverd@bioblue.com.au',
+  'Brad Ryan':         'brad@bioblue.com.au',
+};
+const BDM_LIST = Object.keys(BDM_EMAILS);
+
 let gdriveToken = null;
 let trackerFileId = null;
 let prospects = [];
 let stateFilter = 'ALL';
+let bdmFilter = 'ALL';
+let stageFilter = 'ALL';
 let searchFilter = '';
+// "Acting as" — whichever BDM is using the app right now. Defaults new
+// leads to this person, persisted per-browser so it doesn't need resetting
+// every visit. Separate from bdmFilter, which is just what's shown.
+let currentBDM = sessionStorage.getItem('bb_tracker_bdm') || 'Michael Hodnett';
 let saveInFlight = false;
 let saveQueued = false;
 
@@ -324,7 +396,29 @@ function uid() { return 'PT-' + Date.now() + '-' + Math.random().toString(36).sl
 // =====================================================================
 // AUTH + LOAD
 // =====================================================================
+// Standalone home-screen mode on iOS hides the browser's own reload
+// control entirely, so this button is the only way to force a fresh fetch
+// from inside the app itself. Appending a changing query param (rather
+// than a plain reload) means the URL is technically different every time,
+// which forces a genuine re-fetch instead of relying on the browser to
+// decide the cached copy is stale.
+function forceRefresh() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('_r', Date.now());
+  window.location.href = url.toString();
+}
+
 function setAuthStatus(msg) { document.getElementById('authStatus').textContent = msg; }
+
+function setSaveStatus(state, text) {
+  const dot = document.getElementById('saveStatusDot');
+  const label = document.getElementById('saveStatusText');
+  if (!dot || !label) return;
+  const colors = { saved: '#4ADE80', saving: '#fbbf24', error: '#f87171', off: 'rgba(255,255,255,0.3)' };
+  dot.style.background = colors[state] || colors.off;
+  label.textContent = text;
+  label.style.color = state === 'off' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.7)';
+}
 
 async function ensureToken() {
   if (gdriveToken) return;
@@ -371,54 +465,647 @@ async function getOrCreateFolder(parentId, name) {
   catch (e) { delete _folderCache[key]; throw e; }
 }
 
-// One-time starter data — only ever used the moment the Drive file is first
-// created (i.e. genuinely zero prospects in the system yet). The other six
-// from the original working list (Patience Haulage, FLG, DTMT, Red Dust
-// Holdings, B & J Catalano, Dinos Transport) already have Prospect/Client
-// records, so they're intentionally excluded here.
+// LIVE: a brand-new live tracker file starts empty. Real leads come across
+// once via migrateFromTest() below. The old TEST starter list is kept only
+// as an unused reference (it returns before reaching it).
 function getSeedProspects() {
+  return [];
   const today = todayStr();
   const plus7 = addDays(today, 7);
   return [
-    { id: uid(), company:'Valley Transport', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
-      status:'New Lead', activity:[], nextFollowUp:null, lostReason:null, createdDate:today, promotedClientId:null },
+    { id: uid(), company:'Varley Transport', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
+      bdm:'Michael Hodnett', status:'New Lead', activity:[], nextFollowUp:null, lostReason:null, createdDate:today, clientId:null },
     { id: uid(), company:'Sands Refrigeration', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
-      status:'Quoted', activity:[
+      bdm:'Michael Hodnett', status:'Quoted', activity:[
         {date:today,type:'email',text:'Cold-call email sent'},
         {date:today,type:'call',text:'Follow-up call made'},
         {date:today,type:'note',text:'Quotes supplied, continue to follow-up'}
-      ], nextFollowUp:plus7, lostReason:null, createdDate:today, promotedClientId:null },
+      ], nextFollowUp:plus7, lostReason:null, createdDate:today, clientId:null },
     { id: uid(), company:'Fenix', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
-      status:'Contacted', activity:[
+      bdm:'Michael Hodnett', status:'Contacted', activity:[
         {date:today,type:'email',text:'Cold-call email sent'},
         {date:today,type:'note',text:'Need to follow-up with phone call'}
-      ], nextFollowUp:plus7, lostReason:null, createdDate:today, promotedClientId:null },
+      ], nextFollowUp:plus7, lostReason:null, createdDate:today, clientId:null },
     { id: uid(), company:'McMan Bennett', state:'WA', contactName:'Michael McNeill', contactPhone:'', contactEmail:'',
-      status:'Engaged', activity:[
+      bdm:'Michael Hodnett', status:'Engaged', activity:[
         {date:today,type:'email',text:'Cold-call email sent'},
         {date:today,type:'call',text:'Follow-up call made'},
         {date:today,type:'note',text:'Follow-up with Michael McNeill on 17 August'}
-      ], nextFollowUp:'2026-08-17', lostReason:null, createdDate:today, promotedClientId:null },
+      ], nextFollowUp:'2026-08-17', lostReason:null, createdDate:today, clientId:null },
     { id: uid(), company:'Flexi Trans', state:'WA', contactName:'Darren', contactPhone:'', contactEmail:'',
-      status:'Contacted', activity:[
+      bdm:'Michael Hodnett', status:'Contacted', activity:[
         {date:today,type:'email',text:'Cold-call email sent'},
         {date:today,type:'call',text:'Left one message for Darren'},
         {date:today,type:'note',text:'Follow-up again'}
-      ], nextFollowUp:plus7, lostReason:null, createdDate:today, promotedClientId:null },
+      ], nextFollowUp:plus7, lostReason:null, createdDate:today, clientId:null },
     { id: uid(), company:'Swan Transit', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
-      status:'New Lead', activity:[], nextFollowUp:null, lostReason:null, createdDate:today, promotedClientId:null }
+      bdm:'Michael Hodnett', status:'New Lead', activity:[], nextFollowUp:null, lostReason:null, createdDate:today, clientId:null }
   ];
 }
 
-async function getTrackerFileId() {
-  if (trackerFileId) return trackerFileId;
+// =====================================================================
+// CLIENT RECORDS — read/write the shared spreadsheet, and mint a new
+// Client ID the first time a Tracker lead needs a quote. Mirrors the
+// exact header list, ID format (BB-XXXX sequential), and 'Prospect ✓'
+// value ('✓') used by the Prospect/Client form, so a row created here
+// is indistinguishable from one that form would have created — Quote
+// Builder and the Prospect/Client form need zero changes to read it.
+// =====================================================================
+const CLIENT_RECORDS_HEADERS = [
+  'Client ID','Billing Entity','Site Name','Site Location Name','Descriptor','Trackpod Name',
+  'Street Address','Suburb','State','Postcode',
+  'Business Contact Name','Business Contact Role','Business Contact Email','Business Contact Phone',
+  'KDM Name','KDM Role','KDM Email','KDM Phone',
+  'Logistics Name','Logistics Role','Logistics Email','Logistics Phone',
+  'Admin Contact Name','Admin Contact Role','Admin Contact Email','Admin Contact Phone',
+  'Other Contact Label','Other Contact Name','Other Contact Role','Other Contact Email','Other Contact Phone',
+  'POD Email','POD Email 2','POD Email 3',
+  'Contact Name','Contact Title','Contact Mobile','Contact Email',
+  'Product Interest','Current Supplier','Estimated Volume','Estimated Current Price','Active Products',
+  'Is Distributor / Reseller','Additional Invoicing Emails','PO Required','PO Delivery Email',
+  'BDM Email','Max Vehicle Size','Latest Note',
+  'Prospect \u2713','Quote Sent \u2713','Site Admin \u2713','Site Audit \u2713','Pkg Assessment \u2713','Customer \u2713',
+  'Prospect Doc #','Admin Doc #','Audit Doc #','Packaged Doc #','Quote Doc #','Record Status',
+  'Drive Folder ID','Created Date','Created By','Cloned From Client ID','Notes Log'
+];
+
+let _adminSheetIdCache = null;
+async function getOrCreateAdminSheetId(rootFolderId) {
+  if (_adminSheetIdCache) return _adminSheetIdCache;
+  const adminFolderId = await getOrCreateFolder(rootFolderId, 'ADMIN DATA - DO NOT REMOVE');
+  const sr = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name='${CLIENT_RECORDS_NAME}' and '${adminFolderId}' in parents and trashed=false&fields=files(id)`,
+    { headers: { Authorization: `Bearer ${gdriveToken}` } }
+  );
+  const sd = await sr.json();
+  if (sd.files && sd.files.length) { _adminSheetIdCache = sd.files[0].id; return _adminSheetIdCache; }
+
+  // Not found — create a fresh workbook with the correct columns, same
+  // structure the Prospect/Client form creates if it gets there first.
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([CLIENT_RECORDS_HEADERS]);
+  XLSX.utils.book_append_sheet(wb, ws, 'Client Records');
+  const nws = XLSX.utils.aoa_to_sheet([['Client ID','Billing Entity','Site Name','Timestamp','Form','BDM','Notes']]);
+  XLSX.utils.book_append_sheet(wb, nws, 'Notes Log');
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify({ name: CLIENT_RECORDS_NAME, parents: [adminFolderId] })], { type: 'application/json' }));
+  form.append('file', blob);
+  const cr = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+    method: 'POST', headers: { Authorization: `Bearer ${gdriveToken}` }, body: form
+  });
+  _adminSheetIdCache = (await cr.json()).id;
+  return _adminSheetIdCache;
+}
+
+async function getDriveRootId() {
   const rf = await fetch(
     `https://www.googleapis.com/drive/v3/files?q=name='${GDRIVE_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id)`,
     { headers: { Authorization: `Bearer ${gdriveToken}` } }
   );
   const rd = await rf.json();
-  if (!rd.files || !rd.files.length) throw new Error('BioBlue Audits folder not found');
+  if (rd.files && rd.files.length) return rd.files[0].id;
+  const cr = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST', headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: GDRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' })
+  });
+  return (await cr.json()).id;
+}
+
+// Mints a Client ID + Drive folder (inside Prospects/) the first time a
+// quote is needed for this lead, and writes a Client Records row with
+// 'Prospect ✓' already set — so Quote Builder's existing gate passes
+// with zero changes to that file. Returns the new Client ID.
+async function mintClientId(p) {
+  const rootId = await getDriveRootId();
+  const prospectsId = await getOrCreateFolder(rootId, PROSPECTS_FOLDER);
+  const folderName = (p.company || 'Unnamed').slice(0, 50);
+  const clientFolderId = await getOrCreateFolder(prospectsId, folderName);
+
+  const sheetId = await getOrCreateAdminSheetId(rootId);
+  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+  const ab = await dl.arrayBuffer();
+  const wb = XLSX.read(new Uint8Array(ab), { type: 'array' });
+  const ws = wb.Sheets['Client Records'];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+  const headers = rows[0] || CLIENT_RECORDS_HEADERS;
+
+  const idCol = headers.indexOf('Client ID');
+  const existingIds = rows.slice(1).map(r => r[idCol]).filter(Boolean);
+  const maxId = existingIds.reduce((m, id) => { const n = parseInt((id + '').replace('BB-', '')); return isNaN(n) ? m : (n > m ? n : m); }, 0);
+  const newId = `BB-${String(maxId + 1).padStart(4, '0')}`;
+
+  const targetRow = new Array(headers.length).fill('');
+  const set = (col, val) => { const i = headers.indexOf(col); if (i > -1) targetRow[i] = val; };
+  set('Client ID', newId);
+  set('Billing Entity', p.company || '');
+  set('Descriptor', p.descriptor || '');
+  set('Street Address', p.streetAddress || '');
+  set('Suburb', p.suburb || '');
+  set('State', p.state || '');
+  set('Postcode', p.postcode || '');
+  set('Product Interest', p.productInterest || '');
+  set('Current Supplier', p.currentSupplier || '');
+  set('Estimated Volume', p.estimatedVolumeLitres ? `${p.estimatedVolumeLitres}L per ${p.estimatedVolumePeriod === 'annum' ? 'annum' : 'month'}` : '');
+  set('Business Contact Name', p.contactName || '');
+  set('Business Contact Role', p.contactRole || '');
+  set('Business Contact Email', p.contactEmail || '');
+  set('Business Contact Phone', p.contactPhone || '');
+  set('KDM Name', p.contact2Name || '');
+  set('KDM Role', p.contact2Role || '');
+  set('KDM Email', p.contact2Email || '');
+  set('KDM Phone', p.contact2Phone || '');
+  set('Other Contact Label', p.contact3Label || '');
+  set('Other Contact Name', p.contact3Name || '');
+  set('Other Contact Role', p.contact3Role || '');
+  set('Other Contact Email', p.contact3Email || '');
+  set('Other Contact Phone', p.contact3Phone || '');
+  set('BDM Email', BDM_EMAILS[p.bdm] || BDM_EMAILS['Michael Hodnett']);
+  set('Prospect \u2713', '\u2713');
+  set('Record Status', 'Prospect');
+  set('Drive Folder ID', clientFolderId);
+  set('Created Date', todayStr());
+  set('Created By', p.bdm || 'Michael Hodnett');
+
+  rows.push(targetRow);
+  const newWs = XLSX.utils.aoa_to_sheet(rows);
+  const newWb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(newWb, newWs, 'Client Records');
+  if (wb.Sheets['Notes Log']) XLSX.utils.book_append_sheet(newWb, wb.Sheets['Notes Log'], 'Notes Log');
+  const out = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  await fetch(`https://www.googleapis.com/upload/drive/v3/files/${sheetId}?uploadType=media`, {
+    method: 'PATCH', headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: blob
+  });
+
+  return newId;
+}
+
+// =====================================================================
+// LIVE SYNC — once a lead has a Client ID, edits to the fields below
+// push straight into that lead's *existing* Client Records row instead
+// of going stale until the next quote/audit touches it. Deliberately
+// narrow: only the columns the Tracker is the source of truth for
+// (company/address/product interest/contacts). Everything else in the
+// row — doc numbers, Drive Folder ID, Trackpod/Generated Site Name,
+// POD emails, Record Status, etc. — is read back and rewritten
+// untouched, so Quote Builder/Audit/Admin edits are never clobbered.
+// =====================================================================
+const CLIENT_RECORD_SYNCED_FIELDS = new Set([
+  'company', 'descriptor', 'streetAddress', 'suburb', 'state', 'postcode',
+  'productInterest', 'currentSupplier', 'estimatedVolumeLitres', 'estimatedVolumePeriod',
+  'contactName', 'contactRole', 'contactEmail', 'contactPhone',
+  'contact2Name', 'contact2Role', 'contact2Email', 'contact2Phone',
+  'contact3Label', 'contact3Name', 'contact3Role', 'contact3Email', 'contact3Phone'
+]);
+
+// Writes the Tracker-owned fields from `p` into `row` (an existing
+// Client Records row array), using the same header lookups as
+// mintClientId so the two never drift apart. Shared by the live sync
+// below and the manual "Resync all" backfill.
+function applyProspectToClientRow(p, row, headers) {
+  while (row.length < headers.length) row.push('');
+  const set = (col, val) => { const i = headers.indexOf(col); if (i > -1) row[i] = val; };
+  set('Billing Entity', p.company || '');
+  set('Descriptor', p.descriptor || '');
+  set('Street Address', p.streetAddress || '');
+  set('Suburb', p.suburb || '');
+  set('State', p.state || '');
+  set('Postcode', p.postcode || '');
+  set('Product Interest', p.productInterest || '');
+  set('Current Supplier', p.currentSupplier || '');
+  set('Estimated Volume', p.estimatedVolumeLitres ? `${p.estimatedVolumeLitres}L per ${p.estimatedVolumePeriod === 'annum' ? 'annum' : 'month'}` : '');
+  set('Business Contact Name', p.contactName || '');
+  set('Business Contact Role', p.contactRole || '');
+  set('Business Contact Email', p.contactEmail || '');
+  set('Business Contact Phone', p.contactPhone || '');
+  set('KDM Name', p.contact2Name || '');
+  set('KDM Role', p.contact2Role || '');
+  set('KDM Email', p.contact2Email || '');
+  set('KDM Phone', p.contact2Phone || '');
+  set('Other Contact Label', p.contact3Label || '');
+  set('Other Contact Name', p.contact3Name || '');
+  set('Other Contact Role', p.contact3Role || '');
+  set('Other Contact Email', p.contact3Email || '');
+  set('Other Contact Phone', p.contact3Phone || '');
+  return row;
+}
+
+// Downloads Client Records once, patches every prospect in `list` that
+// has a matching row (by Client ID), and writes back once — so editing
+// several leads in a row (or the bulk backfill) doesn't do a
+// download/upload round-trip per lead.
+async function pushProspectsToClientRecords(list) {
+  if (!list.length) return;
+  if (!gdriveToken) { const ok = await ensureConnected(); if (!ok) throw new Error('Not connected'); }
+  const rootId = await getDriveRootId();
+  const sheetId = await getOrCreateAdminSheetId(rootId);
+  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+  if (!dl.ok) throw new Error('Client Records download failed (' + dl.status + ')');
+  const ab = await dl.arrayBuffer();
+  const wb = XLSX.read(new Uint8Array(ab), { type: 'array' });
+  const ws = wb.Sheets['Client Records'];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+  const headers = rows[0] || CLIENT_RECORDS_HEADERS;
+  const idCol = headers.indexOf('Client ID');
+
+  let changed = false;
+  const missing = [];
+  for (const p of list) {
+    const rowIdx = rows.findIndex((r, i) => i > 0 && r[idCol] === p.clientId);
+    if (rowIdx === -1) { missing.push(p.company || p.clientId); continue; }
+    rows[rowIdx] = applyProspectToClientRow(p, rows[rowIdx], headers);
+    changed = true;
+  }
+  if (!changed) {
+    if (missing.length) throw new Error(`No Client Records row found for: ${missing.join(', ')}`);
+    return;
+  }
+
+  const newWs = XLSX.utils.aoa_to_sheet(rows);
+  const newWb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(newWb, newWs, 'Client Records');
+  if (wb.Sheets['Notes Log']) XLSX.utils.book_append_sheet(newWb, wb.Sheets['Notes Log'], 'Notes Log');
+  const out = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const up = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${sheetId}?uploadType=media`, {
+    method: 'PATCH', headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: blob
+  });
+  if (!up.ok) throw new Error('Client Records upload failed (' + up.status + ')');
+  if (missing.length) throw new Error(`Saved, but no Client Records row found for: ${missing.join(', ')}`);
+}
+
+// Single-flight queue, mirrors saveTracker()'s coalescing pattern: a
+// burst of field edits (e.g. tabbing through several contact fields)
+// collapses into one download/upload instead of one per field.
+let clientSyncInFlight = false;
+let clientSyncQueueIds = new Set();
+async function queueClientRecordSync(p) {
+  clientSyncQueueIds.add(p.id);
+  if (clientSyncInFlight) return;
+  clientSyncInFlight = true;
+  try {
+    while (clientSyncQueueIds.size) {
+      const ids = Array.from(clientSyncQueueIds);
+      clientSyncQueueIds.clear();
+      const batch = ids.map(findProspect).filter(x => x && x.clientId);
+      if (batch.length) await pushProspectsToClientRecords(batch);
+    }
+  } catch (e) {
+    showToast('\u26A0\uFE0F Client record sync failed \u2014 ' + e.message);
+  } finally {
+    clientSyncInFlight = false;
+  }
+}
+
+// Manual escape hatch: re-pushes every lead that already has a Client ID,
+// regardless of whether anything changed. Used once as a backfill for
+// leads that went stale before live sync existed, and available any
+// time afterward if a sync is ever suspected to have failed silently.
+async function resyncAllToClientRecords() {
+  const withClientId = prospects.filter(p => p.clientId);
+  if (!withClientId.length) { showToast('No leads have a Client ID yet \u2014 nothing to sync'); return; }
+  showToast(`Syncing ${withClientId.length} lead(s) to Client Records...`);
+  try {
+    await pushProspectsToClientRecords(withClientId);
+    showToast(`\u2705 Synced ${withClientId.length} lead(s) to Client Records`);
+  } catch (e) {
+    showToast('\u26A0\uFE0F Resync failed \u2014 ' + e.message);
+  }
+}
+
+function bdmNameFromEmail(email) {
+  const found = Object.entries(BDM_EMAILS).find(([, e]) => e === (email || '').trim());
+  return found ? found[0] : 'Michael Hodnett';
+}
+
+// Best-effort status inference from the old checkbox flags. Every row in
+// Client Records already has 'Prospect ✓' set (it's written the moment
+// the form is submitted), so that alone can't distinguish stages — the
+// real signal is which of Quote Sent / Customer are also set. This is
+// necessarily approximate: the old data model never tracked Contacted vs
+// Engaged as separate stages, so anything imported lands at Engaged or
+// later. Every field on an imported card is editable afterward the same
+// as any other, so a wrong guess here is a one-tap fix, not a re-import.
+function inferStatusFromRecord(get) {
+  if ((get('Customer \u2713') || '').trim()) return 'Won';
+  if ((get('Quote Sent \u2713') || '').trim()) return 'Quoted';
+  return 'Engaged';
+}
+
+// One-time (but safely re-runnable) backfill for prospects that already
+// have a full Prospect/Client record from before the Tracker existed.
+// Matches on Client ID to skip anything already present, so running this
+// more than once never creates duplicates.
+// Points at the REAL production Drive folder. In this live file it matches
+// GDRIVE_FOLDER_NAME; kept as its own constant because the read-only import
+// path below and migrateFromTest() must never create anything.
+const PRODUCTION_FOLDER_NAME = 'BioBlue Audits';
+
+// Read-only, and deliberately the opposite of getOrCreateFolder's
+// find-or-create behaviour: if BioBlue Audits, ADMIN DATA, or the Client
+// Records file itself isn't found exactly where expected, this throws and
+// stops — it must never create anything in production, under any
+// circumstance. Nothing in this function writes anywhere.
+async function getProductionClientRecordsRows() {
+  const rf = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name='${PRODUCTION_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id)`,
+    { headers: { Authorization: `Bearer ${gdriveToken}` } }
+  );
+  const rd = await rf.json();
+  if (!rd.files || !rd.files.length) throw new Error(`Production folder "${PRODUCTION_FOLDER_NAME}" not found`);
   const rootId = rd.files[0].id;
+
+  const af = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name='ADMIN DATA - DO NOT REMOVE' and '${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id)`,
+    { headers: { Authorization: `Bearer ${gdriveToken}` } }
+  );
+  const ad = await af.json();
+  if (!ad.files || !ad.files.length) throw new Error('Production ADMIN DATA folder not found');
+  const adminId = ad.files[0].id;
+
+  const sf = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name='${CLIENT_RECORDS_NAME}' and '${adminId}' in parents and trashed=false&fields=files(id)`,
+    { headers: { Authorization: `Bearer ${gdriveToken}` } }
+  );
+  const sd = await sf.json();
+  if (!sd.files || !sd.files.length) throw new Error('Production Client Records file not found');
+
+  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${sd.files[0].id}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+  if (!dl.ok) throw new Error('Download failed (' + dl.status + ')');
+  const ab = await dl.arrayBuffer();
+  const wb = XLSX.read(new Uint8Array(ab), { type: 'array' });
+  const ws = wb.Sheets['Client Records'];
+  if (!ws) throw new Error('Client Records sheet not found in production file');
+  return XLSX.utils.sheet_to_json(ws, { header: 1 });
+}
+
+// Shared by the picker below — turns one Client Records row into a
+// Tracker prospect object. Kept as one function so there's only one place
+// that needs updating if the mapping ever changes.
+// =====================================================================
+// =====================================================================
+// TAP-TO-CALL — iOS never auto-links a phone number sitting inside a
+// text input (only in plain rendered text), and these fields need to
+// stay editable, so a small tel: link sits next to each phone field
+// instead of replacing the input. Reads the input's current value at
+// tap time rather than baking a static href, so an unsaved edit still
+// dials correctly.
+function callPhoneField(linkEl) {
+  const input = linkEl.previousElementSibling;
+  const raw = (input?.value || '').trim();
+  if (!raw) { showToast('\u26A0\uFE0F No phone number entered'); return; }
+  const cleaned = raw.replace(/[^\d+]/g, '');
+  if (!cleaned) { showToast('\u26A0\uFE0F No phone number entered'); return; }
+  window.location.href = 'tel:' + cleaned;
+}
+
+// SAVE CONTACT TO PHONE (vCard) — ported from the Prospect/Client form's
+// working implementation, not rebuilt from scratch. The iOS handling below
+// is the hard-won part: forcing a `download` attribute makes iOS Safari
+// save the file into the Files app instead of offering to add it as a
+// contact, so iOS gets a direct navigation to the blob URL instead, which
+// hands off to the native Add Contact sheet correctly. Also carried over:
+// every save fires from a real tap on its own button, never a timer —
+// mobile browsers can silently block a download that isn't a direct user
+// gesture, which is exactly what broke the original single-button version.
+// =====================================================================
+function generateVCardFile(name, role, phone, email, company, address, note) {
+  if (!name) return;
+  const nameParts = name.split(' ');
+  const firstName = nameParts[0] || '';
+  const lastName = nameParts.slice(1).join(' ') || '';
+  const lines = [
+    'BEGIN:VCARD',
+    'VERSION:3.0',
+    'FN:' + name,
+    'N:' + lastName + ';' + firstName + ';;;',
+    company ? 'ORG:' + company : '',
+    role    ? 'TITLE:' + role  : '',
+    phone   ? 'TEL;TYPE=CELL:' + phone : '',
+    email   ? 'EMAIL:' + email : '',
+    address ? 'ADR;TYPE=WORK:;;' + address : '',
+    note    ? 'NOTE:' + note   : '',
+    'END:VCARD'
+  ].filter(Boolean).join('\r\n');
+  const blob = new Blob([lines], { type: 'text/vcard;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  if (isIOS) {
+    window.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } else {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name.replace(/\s+/g, '_') + '.vcf';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+}
+
+function saveContactVCard(id, slot) {
+  const p = findProspect(id);
+  if (!p) return;
+  const address = [p.streetAddress, p.suburb, p.state, p.postcode].filter(Boolean).join(', ');
+  const note = 'BioBlue prospect contact \u2014 ' + (p.company || '') + '. Added by ' + (p.bdm || '') + '.';
+  if (slot === 1) generateVCardFile(p.contactName, p.contactRole, p.contactPhone, p.contactEmail, p.company, address, note);
+  else if (slot === 2) generateVCardFile(p.contact2Name, p.contact2Role, p.contact2Phone, p.contact2Email, p.company, address, note);
+  else if (slot === 3) generateVCardFile(p.contact3Name, p.contact3Label, p.contact3Phone, p.contact3Email, p.company, address, note);
+}
+
+function mapRowToProspect(get, clientId) {
+  return {
+    id: uid(),
+    clientId: clientId,
+    company: get('Billing Entity'),
+    state: get('State') || 'WA',
+    bdm: bdmNameFromEmail(get('BDM Email')),
+    descriptor: get('Descriptor'),
+    streetAddress: get('Street Address'),
+    suburb: get('Suburb'),
+    postcode: get('Postcode'),
+    productInterest: get('Product Interest'),
+    currentSupplier: get('Current Supplier'),
+    estimatedVolumeLitres: '',
+    estimatedVolumePeriod: 'month',
+    contactName: get('Business Contact Name'),
+    contactRole: get('Business Contact Role'),
+    contactPhone: get('Business Contact Phone'),
+    contactEmail: get('Business Contact Email'),
+    contact2Name: get('KDM Name'),
+    contact2Role: get('KDM Role'),
+    contact2Phone: get('KDM Phone'),
+    contact2Email: get('KDM Email'),
+    contact3Label: get('Other Contact Label'),
+    contact3Name: get('Other Contact Name'),
+    contact3Phone: get('Other Contact Phone'),
+    contact3Email: get('Other Contact Email'),
+    status: inferStatusFromRecord(get),
+    activity: [{ date: todayStr(), type: 'note', text: 'Imported from existing Prospect/Client record' }],
+    nextFollowUp: null,
+    lostReason: null,
+    createdDate: (get('Created Date') || todayStr()).toString().slice(0, 10),
+  };
+}
+
+// =====================================================================
+// IMPORT PICKER — search production Client Records and choose exactly
+// which ones to bring in, one or many, rather than an all-or-nothing pull.
+// =====================================================================
+let _importCandidates = [];   // [{ clientId, company, state, get }] — not yet in the Tracker
+let _importSelected = new Set();
+let _importSearch = '';
+
+async function openImportPicker() {
+  document.getElementById('importModal').classList.add('open');
+  document.getElementById('importCandidateCount').textContent = 'Loading...';
+  document.getElementById('importList').innerHTML = '';
+  document.getElementById('importSearchInput').value = '';
+  _importSearch = '';
+  _importSelected = new Set();
+
+  try {
+    const connected = await ensureConnected();
+    if (!connected) throw new Error('Could not connect to Drive');
+
+    const rows = await getProductionClientRecordsRows();
+    const headers = rows[0] || [];
+    const idx = {};
+    headers.forEach((h, i) => { idx[h] = i; });
+    const existingIds = new Set(prospects.map(p => p.clientId).filter(Boolean));
+
+    _importCandidates = rows.slice(1)
+      .map(row => {
+        const get = (col) => (idx[col] !== undefined ? row[idx[col]] : '') || '';
+        return { clientId: get('Client ID'), company: get('Billing Entity'), state: get('State') || '', get };
+      })
+      .filter(c => c.clientId && !existingIds.has(c.clientId) && c.company);
+
+    renderImportPicker();
+  } catch (e) {
+    document.getElementById('importCandidateCount').textContent = 'Error';
+    document.getElementById('importList').innerHTML = `<div class="empty-note">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function setImportSearch(v) {
+  _importSearch = (v || '').trim().toLowerCase();
+  renderImportPicker();
+}
+
+function toggleImportSelection(clientId) {
+  if (_importSelected.has(clientId)) _importSelected.delete(clientId);
+  else _importSelected.add(clientId);
+  renderImportPicker();
+}
+
+function toggleSelectAllImport() {
+  const shown = _importCandidates.filter(c => !_importSearch || c.company.toLowerCase().includes(_importSearch));
+  const allSelected = shown.length > 0 && shown.every(c => _importSelected.has(c.clientId));
+  shown.forEach(c => { if (allSelected) _importSelected.delete(c.clientId); else _importSelected.add(c.clientId); });
+  renderImportPicker();
+}
+
+function renderImportPicker() {
+  const shown = _importCandidates.filter(c => !_importSearch || c.company.toLowerCase().includes(_importSearch));
+  document.getElementById('importCandidateCount').textContent = `${shown.length} available`;
+  document.getElementById('importList').innerHTML = shown.length
+    ? shown.map(c => `
+      <div onclick="toggleImportSelection('${c.clientId}')" style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid rgba(255,255,255,0.06);cursor:pointer;">
+        <input type="checkbox" ${_importSelected.has(c.clientId)?'checked':''} style="pointer-events:none;flex-shrink:0;">
+        <div>
+          <div style="font-size:13px;font-weight:600;">${escapeHtml(c.company)}</div>
+          <div style="font-size:10px;opacity:0.5;">${escapeHtml(c.state)} \u00b7 ${escapeHtml(c.clientId)}</div>
+        </div>
+      </div>`).join('')
+    : `<div class="empty-note">${_importSearch ? 'No matches' : 'Nothing left to import \u2014 already up to date'}</div>`;
+  document.getElementById('importConfirmBtn').textContent = `Import selected (${_importSelected.size})`;
+}
+
+function closeImportPicker() {
+  document.getElementById('importModal').classList.remove('open');
+}
+
+function confirmImportSelected() {
+  if (_importSelected.size === 0) { showToast('Select at least one to import'); return; }
+  let count = 0;
+  _importCandidates.forEach(c => {
+    if (_importSelected.has(c.clientId)) {
+      prospects.push(mapRowToProspect(c.get, c.clientId));
+      count++;
+    }
+  });
+  saveTracker();
+  render();
+  closeImportPicker();
+  showToast(`\u2705 Imported ${count} prospect${count!==1?'s':''}`);
+}
+
+// Drive keeps a folder's ID stable across a parent change — this is a
+// genuine move, not a delete-and-recreate, so the Drive Folder ID already
+// stored in Client Records, and any direct link to it, keeps working.
+async function moveFolderToClients(folderId) {
+  const rootId = await getDriveRootId();
+  const clientsId = await getOrCreateFolder(rootId, CLIENTS_FOLDER);
+  const meta = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=parents`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+  const metaData = await meta.json();
+  const currentParents = (metaData.parents || []).join(',');
+  await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?addParents=${clientsId}&removeParents=${currentParents}`, {
+    method: 'PATCH', headers: { Authorization: `Bearer ${gdriveToken}` }
+  });
+}
+
+// Mirrors moveFolderToClients exactly, just to the Lost subfolder instead —
+// keeps Prospects/ clean of dead deals the same way Won keeps it clean of
+// converted ones. Same stable-ID guarantee: this is a parent change, not a
+// delete-and-recreate, so the stored Drive Folder ID stays valid.
+async function moveFolderToLost(folderId) {
+  const rootId = await getDriveRootId();
+  const lostId = await getOrCreateFolder(rootId, LOST_FOLDER);
+  const meta = await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?fields=parents`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+  const metaData = await meta.json();
+  const currentParents = (metaData.parents || []).join(',');
+  await fetch(`https://www.googleapis.com/drive/v3/files/${folderId}?addParents=${lostId}&removeParents=${currentParents}`, {
+    method: 'PATCH', headers: { Authorization: `Bearer ${gdriveToken}` }
+  });
+}
+
+// Primary forward action from the tracker. If this lead already has a
+// Client ID (a quote was generated before), just opens Quote Builder
+// against it. Otherwise mints one first — the only Drive-folder-creating
+// action in the whole tracker, deliberately deferred until a quote is
+// actually needed so leads that go nowhere never create Drive clutter.
+async function generateQuote(id) {
+  const p = findProspect(id);
+  if (!p) return;
+  try {
+    if (!p.clientId) {
+      // Suburb and Descriptor are required on the Prospect/Client form —
+      // not blocking here (a BDM may genuinely not have this yet from a
+      // first call), just a heads-up on what'll need filling in before
+      // that form can be submitted. Shown before the mint work starts so
+      // there's time to actually see it before the redirect happens.
+      const missing = [];
+      if (!p.suburb) missing.push('Suburb');
+      if (!p.descriptor) missing.push('Descriptor');
+      if (missing.length) showToast(`\u26A0\uFE0F Missing ${missing.join(' & ')} \u2014 required later on the client form`);
+
+      await ensureToken();
+      showToast('Setting up client record...');
+      p.clientId = await mintClientId(p);
+      if (p.status === 'New Lead' || p.status === 'Contacted') p.status = 'Engaged';
+      saveTracker();
+    }
+    window.location.href = `${QUOTE_BUILDER_URL}/?client=${encodeURIComponent(p.clientId)}&name=${encodeURIComponent(p.company)}`;
+  } catch (e) {
+    showToast('\u26A0\uFE0F Could not set up client record — ' + e.message);
+  }
+}
+
+async function getTrackerFileId() {
+  if (trackerFileId) return trackerFileId;
+  const rootId = await getDriveRootId();
 
   const adminId   = await getOrCreateFolder(rootId, 'ADMIN DATA - DO NOT REMOVE');
   const trackerId = await getOrCreateFolder(adminId, TRACKER_SUBFOLDER);
@@ -430,9 +1117,9 @@ async function getTrackerFileId() {
   const fd = await fr.json();
   if (fd.files && fd.files.length) { trackerFileId = fd.files[0].id; return trackerFileId; }
 
-  // Not found — create fresh file, seeded with the six starter prospects
-  // (see getSeedProspects above). This branch only ever runs once, the
-  // moment the file doesn't exist yet in Drive.
+  // Not found — create a fresh file (empty in live — see getSeedProspects
+  // above). This branch only ever runs once, the moment the file doesn't
+  // exist yet in Drive.
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify({ name: TRACKER_FILE_NAME, parents: [trackerId] })], { type: 'application/json' }));
   form.append('file', new Blob([JSON.stringify(getSeedProspects())], { type: 'application/json' }));
@@ -444,29 +1131,91 @@ async function getTrackerFileId() {
   return trackerFileId;
 }
 
-async function loadTracker() {
-  setAuthStatus('\uD83D\uDD10 Connecting to Google...');
+// Resolves gdriveToken + trackerFileId. Idempotent — if already connected
+// this session, returns instantly without a network call or a repeat
+// Google sign-in popup.
+async function connectDrive() {
+  if (gdriveToken && trackerFileId) return true;
   try {
+    setAuthStatus('\uD83D\uDD10 Connecting to Google...');
     await ensureToken();
-    setAuthStatus('\uD83D\uDCC2 Fetching prospects...');
-    const fileId = await getTrackerFileId();
-    const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
-    const text = await dl.text();
-    prospects = text.trim() ? JSON.parse(text) : [];
-    setAuthStatus(`\u2705 ${prospects.length} prospect${prospects.length!==1?'s':''} loaded`);
-    render();
+    setAuthStatus('\uD83D\uDCC2 Locating your data...');
+    await getTrackerFileId();
+    return true;
   } catch (e) {
     gdriveToken = null;
     setAuthStatus('\u274C ' + e.message);
+    return false;
+  }
+}
+
+// Fetches the Drive copy and merges it with whatever's in memory. The
+// merge matters: if a BDM has already added a lead locally (e.g. their
+// very first action this session, before any connection existed), that
+// entry won't be in the Drive copy yet — this keeps it rather than letting
+// the Drive fetch silently replace it. Always a real fetch, unlike
+// connectDrive() which short-circuits once already connected — this is
+// what makes Load useful as an explicit "pull the latest" even mid-session.
+async function fetchAndMergeProspects() {
+  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${trackerFileId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+  if (!dl.ok) throw new Error('Fetch failed (' + dl.status + ')');
+  const text = await dl.text();
+  const driveProspects = text.trim() ? JSON.parse(text) : [];
+  const driveIds = new Set(driveProspects.map(p => p.id));
+  const localOnly = prospects.filter(p => !driveIds.has(p.id));
+  prospects = [...localOnly, ...driveProspects];
+  setAuthStatus(`\u2705 ${prospects.length} prospect${prospects.length!==1?'s':''} loaded`);
+  render();
+  updateMigrateVisibility();
+}
+
+// Explicit Load button — connect if needed, then always refresh, so it
+// doubles as "pick up anything a teammate added" even once already
+// connected, not just a first-time bootstrap step.
+async function loadTracker() {
+  setSaveStatus('saving', 'Connecting...');
+  const ok = await connectDrive();
+  if (!ok) { setSaveStatus('error', 'Not connected \u2014 tap Load to retry'); return; }
+  try {
+    await fetchAndMergeProspects();
+    setSaveStatus('saved', 'Connected \u2014 edits save automatically');
+  } catch (e) {
+    setAuthStatus('\u274C ' + e.message);
+    setSaveStatus('error', 'Not connected \u2014 tap Load to retry');
+  }
+}
+
+// Auto-connect gate, called from inside saveTracker() itself — this is
+// what makes the app "BDM-proof": no one needs to remember to tap Load
+// before their first edit. First save of the session pays the cost of a
+// real connect + safe merge-fetch; every save after that in the same
+// session is already connected, so this returns instantly.
+async function ensureConnected() {
+  if (gdriveToken && trackerFileId) return true;
+  const ok = await connectDrive();
+  if (!ok) return false;
+  try {
+    await fetchAndMergeProspects();
+    return true;
+  } catch (e) {
+    setAuthStatus('\u274C ' + e.message);
+    return false;
   }
 }
 
 async function saveTracker() {
-  if (!gdriveToken || !trackerFileId) { showToast('Tap Load first to connect'); return; }
+  const connected = await ensureConnected();
+  if (!connected) {
+    setSaveStatus('error', 'Not connected \u2014 will retry on your next edit');
+    showToast('\u26A0\uFE0F Could not connect to Drive \u2014 will retry automatically');
+    return false;
+  }
   // Coalesce rapid successive saves (e.g. two quick taps) into one write —
   // last state always wins, matches the documented storage limitation.
-  if (saveInFlight) { saveQueued = true; return; }
+  if (saveInFlight) { saveQueued = true; return true; }
   saveInFlight = true;
+  setSaveStatus('saving', 'Saving...');
+  let ok = false;
   try {
     const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${trackerFileId}?uploadType=media`, {
       method: 'PATCH',
@@ -474,11 +1223,150 @@ async function saveTracker() {
       body: JSON.stringify(prospects)
     });
     if (!res.ok) throw new Error('Save failed (' + res.status + ')');
+    setSaveStatus('saved', 'Saved \u2014 ' + new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }));
+    ok = true;
   } catch (e) {
+    setSaveStatus('error', 'Save failed \u2014 will retry on your next edit');
     showToast('\u26A0\uFE0F Save failed — ' + e.message);
   } finally {
     saveInFlight = false;
     if (saveQueued) { saveQueued = false; saveTracker(); }
+  }
+  return ok;
+}
+
+// Explicit manual save for the Save button — auto-save already fires on
+// every field edit, this is purely for peace of mind: tap it, get a direct
+// yes/no. Reuses saveTracker() rather than duplicating the write logic, so
+// there's still only one place that actually talks to Drive.
+async function manualSave() {
+  const ok = await saveTracker();
+  if (ok) showToast('\u2705 Saved');
+}
+
+// =====================================================================
+// ONE-OFF MIGRATION FROM TEST — brings the leads built up in the TEST
+// tracker across into this live file. The app has to do this itself:
+// with the drive.file scope it can only see files it created, so a JSON
+// copied by hand in the Drive website would be invisible here.
+// Safety rules:
+//  - Read-only against TEST (never creates or edits anything there).
+//  - Only offered while live holds no real leads (empty, or only the
+//    old v1 starter list). Refuses otherwise, so it can never overwrite.
+//  - A Client ID minted in TEST only exists in TEST's Client Records. In
+//    live that number is either missing or belongs to a different client,
+//    and live sync would overwrite that client's row. So an ID is kept
+//    only if live Client Records has that ID with the same company name;
+//    otherwise it's cleared and re-minted later via Generate Quote.
+//  - Shows a summary and writes nothing until confirmed.
+// Remove this block in the next version once migration is done.
+// =====================================================================
+const TEST_FOLDER_NAME = 'BioBlue Audits - TESTING';
+const OLD_STARTER_COMPANIES = new Set(['varley transport','valley transport','sands refrigeration','fenix','mcman bennett','flexi trans','swan transit']);
+
+function normName(s) { return (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' '); }
+
+function liveHasOnlyStarterLeads() {
+  return prospects.every(p => !p.clientId && OLD_STARTER_COMPANIES.has(normName(p.company)));
+}
+
+function updateMigrateVisibility() {
+  const wrap = document.getElementById('migrateFromTestWrap');
+  if (wrap) wrap.style.display = liveHasOnlyStarterLeads() ? 'block' : 'none';
+}
+
+// Read-only lookup: returns the ID or throws. Never creates.
+async function findDriveItemId(query, label) {
+  const r = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query + ' and trashed=false')}&fields=files(id)`,
+    { headers: { Authorization: `Bearer ${gdriveToken}` } }
+  );
+  if (!r.ok) throw new Error(`${label} lookup failed (${r.status})`);
+  const d = await r.json();
+  if (!d.files || !d.files.length) throw new Error(`${label} not found`);
+  return d.files[0].id;
+}
+
+async function readTestTrackerLeads() {
+  const FOLDER = "mimeType='application/vnd.google-apps.folder'";
+  const rootId    = await findDriveItemId(`name='${TEST_FOLDER_NAME}' and ${FOLDER}`, 'TEST root folder');
+  const adminId   = await findDriveItemId(`name='ADMIN DATA - DO NOT REMOVE' and '${rootId}' in parents and ${FOLDER}`, 'TEST ADMIN DATA folder');
+  const trackerId = await findDriveItemId(`name='${TRACKER_SUBFOLDER}' and '${adminId}' in parents and ${FOLDER}`, 'TEST Prospect Tracker Data folder');
+  const fileId    = await findDriveItemId(`name='${TRACKER_FILE_NAME}' and '${trackerId}' in parents`, 'TEST tracker file');
+  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+  if (!dl.ok) throw new Error('TEST tracker download failed (' + dl.status + ')');
+  const text = await dl.text();
+  const list = text.trim() ? JSON.parse(text) : [];
+  if (!Array.isArray(list)) throw new Error('TEST tracker file is not a lead list');
+  return list;
+}
+
+async function migrateFromTest() {
+  try {
+    showToast('Checking live and TEST data...');
+    const ok = await ensureConnected();
+    if (!ok) throw new Error('Could not connect to Drive');
+    await fetchAndMergeProspects();   // always judge against the latest live copy
+    if (!liveHasOnlyStarterLeads()) {
+      alert('Migration stopped: the live tracker already holds real leads, so nothing was changed.');
+      updateMigrateVisibility();
+      return;
+    }
+
+    const testLeads = await readTestTrackerLeads();
+    if (!testLeads.length) { alert('The TEST tracker has no leads to migrate. Nothing was changed.'); return; }
+
+    // Live Client Records: ID -> company, read-only
+    const rows = await getProductionClientRecordsRows();
+    const headers = rows[0] || [];
+    const idCol = headers.indexOf('Client ID');
+    const nameCol = headers.indexOf('Billing Entity');
+    if (idCol === -1 || nameCol === -1) throw new Error('Live Client Records is missing the Client ID or Billing Entity column');
+    const liveIds = new Map();
+    rows.slice(1).forEach(r => { if (r[idCol]) liveIds.set(String(r[idCol]).trim(), normName(r[nameCol])); });
+
+    let kept = 0;
+    const cleared = [];
+    const seen = new Set();
+    const migrated = [];
+    testLeads.forEach(src => {
+      if (!src || !src.id || seen.has(src.id)) return;
+      seen.add(src.id);
+      const p = JSON.parse(JSON.stringify(src));
+      if (!Array.isArray(p.activity)) p.activity = [];
+      if (p.clientId) {
+        const liveName = liveIds.get(String(p.clientId).trim());
+        if (liveName !== undefined && liveName === normName(p.company)) {
+          kept++;
+        } else {
+          cleared.push(`${p.company || '(no name)'} (${p.clientId})`);
+          p.activity.push({ date: todayStr(), type: 'note', text: `Client ID ${p.clientId} was TEST-only and cleared on migration to live — re-mint via Generate Quote` });
+          p.clientId = null;
+        }
+      }
+      migrated.push(p);
+    });
+
+    const replacing = prospects.length;
+    const summary =
+      `Migrate ${migrated.length} lead${migrated.length!==1?'s':''} from TEST into the live tracker?\n\n` +
+      `• Client IDs kept (match live Client Records): ${kept}\n` +
+      `• Client IDs cleared (TEST-only): ${cleared.length}` +
+      (cleared.length ? `\n   ${cleared.slice(0, 8).join('\n   ')}${cleared.length > 8 ? `\n   ...and ${cleared.length - 8} more` : ''}` : '') +
+      (replacing ? `\n• Old starter leads in live to be replaced: ${replacing}` : '') +
+      `\n\nNothing in TEST is changed. Live Client Records is not touched.`;
+    if (!confirm(summary)) { showToast('Migration cancelled — nothing changed'); return; }
+
+    const before = prospects;
+    prospects = migrated;
+    const saved = await saveTracker();
+    if (!saved) prospects = before;   // don't leave unsaved migrated leads mixed in memory
+    render();
+    updateMigrateVisibility();
+    if (saved) showToast(`✅ Migrated ${migrated.length} lead${migrated.length!==1?'s':''} to live`);
+    else alert('Migration could not be saved to Drive, so nothing was changed. Tap Load, then run the migration again.');
+  } catch (e) {
+    alert('Migration stopped — ' + e.message + '\n\nNothing was changed.');
   }
 }
 
@@ -498,6 +1386,7 @@ function addNewLead() {
     id: uid(),
     company,
     state: document.getElementById('nlState').value,
+    bdm: currentBDM,
     contactName: document.getElementById('nlContactName').value.trim(),
     contactPhone: document.getElementById('nlContactPhone').value.trim(),
     contactEmail: document.getElementById('nlContactEmail').value.trim(),
@@ -506,13 +1395,55 @@ function addNewLead() {
     nextFollowUp: null,
     lostReason: null,
     createdDate: todayStr(),
-    promotedClientId: null
+    clientId: null
   };
   prospects.unshift(p);
   ['nlCompany','nlContactName','nlContactPhone','nlContactEmail'].forEach(id => document.getElementById(id).value = '');
   saveTracker();
   render();
   showToast('Lead added — ' + company);
+}
+
+// =====================================================================
+// NOTES LOG SYNC — every call/email/note gets written to the same Notes
+// Log sheet the Prospect/Client form already uses for client conversations,
+// so prospect conversations are exportable the same way. Runs as a strict
+// queue (not in parallel) so two rapid taps can't read-modify-write over
+// each other and silently drop one entry. Before a Client ID exists, the
+// Tracker's own id stands in for it in the Client ID column.
+// =====================================================================
+let _notesLogQueue = Promise.resolve();
+function syncActivityToNotesLog(p, activityText) {
+  _notesLogQueue = _notesLogQueue
+    .then(() => doSyncActivityToNotesLog(p, activityText))
+    .catch(() => showToast('\u26A0\uFE0F Could not sync to Notes Log \u2014 saved locally, will retry next action'));
+  return _notesLogQueue;
+}
+
+async function doSyncActivityToNotesLog(p, activityText) {
+  await ensureToken();
+  const rootId = await getDriveRootId();
+  const sheetId = await getOrCreateAdminSheetId(rootId);
+  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+  if (!dl.ok) throw new Error('Notes Log download failed (' + dl.status + ')');
+  const ab = await dl.arrayBuffer();
+  const wb = XLSX.read(new Uint8Array(ab), { type: 'array' });
+
+  const notesRows = wb.Sheets['Notes Log']
+    ? XLSX.utils.sheet_to_json(wb.Sheets['Notes Log'], { header: 1 })
+    : [['Client ID', 'Billing Entity', 'Site Name', 'Timestamp', 'Form', 'BDM', 'Notes']];
+  notesRows.push([p.clientId || p.id, p.company, p.company, new Date().toISOString(), 'Prospect Tracker', p.bdm || 'Michael Hodnett', activityText]);
+  const newNotesWs = XLSX.utils.aoa_to_sheet(notesRows);
+
+  const newWb = XLSX.utils.book_new();
+  if (wb.Sheets['Client Records']) XLSX.utils.book_append_sheet(newWb, wb.Sheets['Client Records'], 'Client Records');
+  XLSX.utils.book_append_sheet(newWb, newNotesWs, 'Notes Log');
+  const out = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const up = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${sheetId}?uploadType=media`, {
+    method: 'PATCH', headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: blob
+  });
+  if (!up.ok) throw new Error('Notes Log upload failed (' + up.status + ')');
 }
 
 // =====================================================================
@@ -525,16 +1456,38 @@ function logActivity(id, type, text) {
   if (!p) return;
   p.activity.push({ date: todayStr(), type, text });
   // Bump New Lead -> Contacted automatically on first real activity.
-  if (p.status === 'New Lead' && (type === 'email' || type === 'call')) p.status = 'Contacted';
+  if (type === 'visit' && (p.status === 'New Lead' || p.status === 'Contacted')) p.status = 'Engaged';
+  else if (p.status === 'New Lead' && (type === 'email' || type === 'call')) p.status = 'Contacted';
   // Suggest next follow-up 7 days out unless one is already set in the future.
   const suggested = addDays(todayStr(), 7);
   if (!p.nextFollowUp || p.nextFollowUp < todayStr()) p.nextFollowUp = suggested;
   saveTracker();
   render();
+  // Logged locally above (never lost even if this fails) — now sync to the
+  // shared spreadsheet in the background so it's exportable.
+  syncActivityToNotesLog(p, text);
 }
 
-function quickLogCall(id)  { logActivity(id, 'call',  'Follow-up call made'); }
-function quickLogEmail(id) { logActivity(id, 'email', 'Cold-call email sent'); }
+// A native prompt() is deliberate here — it adds zero permanent UI (nothing
+// sits on the card taking up space), only appearing at the exact moment
+// you tap Call made / Email sent. Leaving it blank (or cancelling) still
+// logs the tap itself, just with the old generic text, so the fast one-tap
+// workflow is unchanged when there's genuinely nothing more to note.
+function quickLogCall(id) {
+  const notes = prompt('What was discussed? (optional — leave blank to just log the call)');
+  const text = (notes && notes.trim()) ? `Call made \u2014 ${notes.trim()}` : 'Follow-up call made';
+  logActivity(id, 'call', text);
+}
+function quickLogEmail(id) {
+  const notes = prompt('Any notes on this email? (optional — leave blank to just log it)');
+  const text = (notes && notes.trim()) ? `Email sent \u2014 ${notes.trim()}` : 'Cold-call email sent';
+  logActivity(id, 'email', text);
+}
+function quickLogVisit(id) {
+  const notes = prompt('How did the visit go? (optional — leave blank to just log it)');
+  const text = (notes && notes.trim()) ? `F2F visit \u2014 ${notes.trim()}` : 'Face-to-face visit made';
+  logActivity(id, 'visit', text);
+}
 
 function addNote(id, inputEl) {
   const text = inputEl.value.trim();
@@ -547,9 +1500,98 @@ function changeStatus(id, newStatus) {
   const p = findProspect(id);
   if (!p) return;
   if (newStatus === 'Lost') { openLostModal(id); return; }
+  const wasWon = p.status === 'Won';
   p.status = newStatus;
   saveTracker();
   render();
+  // Won is the trigger to move the Drive folder out of Prospects/ into
+  // Clients/ — only fires once, and only if a folder actually exists yet
+  // (a lead could reach Won without ever generating a quote, e.g. if
+  // Michael onboards them directly via Complete Client Details instead).
+  if (newStatus === 'Won' && !wasWon && p.clientId) {
+    ensureToken().then(() => moveClientFolderOnWon(p)).catch(() => {
+      showToast('\u26A0\uFE0F Could not move folder to Clients — tap Won again to retry');
+    });
+    // Closes the loop the hard-gate message in promoteToClient() points
+    // to — the moment Won is actually set, offer the direct next step
+    // rather than relying on remembering to come back and tap Complete
+    // Client Details separately.
+    const goNow = confirm(`${p.company} marked Won.\n\nContinue straight to the client form to complete the remaining details now?`);
+    if (goNow) {
+      window.location.href = `${PROSPECT_FORM_URL}/?client=${encodeURIComponent(p.clientId)}&name=${encodeURIComponent(p.company)}`;
+    }
+  }
+}
+
+async function moveClientFolderOnWon(p) {
+  try {
+    const rootId = await getDriveRootId();
+    const sheetId = await getOrCreateAdminSheetId(rootId);
+    const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+    const ab = await dl.arrayBuffer();
+    const wb = XLSX.read(new Uint8Array(ab), { type: 'array' });
+    const ws = wb.Sheets['Client Records'];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    const headers = rows[0] || [];
+    const idCol = headers.indexOf('Client ID');
+    const folderCol = headers.indexOf('Drive Folder ID');
+    const custCol = headers.indexOf('Customer \u2713');
+    const rowIdx = rows.findIndex((r, i) => i > 0 && (r[idCol] || '') === p.clientId);
+    if (rowIdx === -1) return;
+    const folderId = rows[rowIdx][folderCol];
+    if (folderId) await moveFolderToClients(folderId);
+    if (custCol > -1) rows[rowIdx][custCol] = '\u2713';
+    const newWs = XLSX.utils.aoa_to_sheet(rows);
+    const newWb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(newWb, newWs, 'Client Records');
+    if (wb.Sheets['Notes Log']) XLSX.utils.book_append_sheet(newWb, wb.Sheets['Notes Log'], 'Notes Log');
+    const out = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${sheetId}?uploadType=media`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: blob
+    });
+    showToast('Moved to Clients folder');
+  } catch (e) {
+    showToast('\u26A0\uFE0F Folder move failed — ' + e.message);
+  }
+}
+
+// Mirrors moveClientFolderOnWon exactly — same lookup, same write pattern —
+// but moves to Lost/ and writes Record Status instead of Customer ✓. Only
+// fires if a Client ID already exists (a quote was generated before this
+// fell through); a lead marked Lost before ever reaching that point has no
+// folder or Client Records row to touch, so there's nothing to sync.
+async function moveClientFolderOnLost(p) {
+  try {
+    const rootId = await getDriveRootId();
+    const sheetId = await getOrCreateAdminSheetId(rootId);
+    const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+    const ab = await dl.arrayBuffer();
+    const wb = XLSX.read(new Uint8Array(ab), { type: 'array' });
+    const ws = wb.Sheets['Client Records'];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    const headers = rows[0] || [];
+    const idCol = headers.indexOf('Client ID');
+    const folderCol = headers.indexOf('Drive Folder ID');
+    const statusCol = headers.indexOf('Record Status');
+    const rowIdx = rows.findIndex((r, i) => i > 0 && (r[idCol] || '') === p.clientId);
+    if (rowIdx === -1) return;
+    const folderId = rows[rowIdx][folderCol];
+    if (folderId) await moveFolderToLost(folderId);
+    if (statusCol > -1) rows[rowIdx][statusCol] = 'Lost' + (p.lostReason ? ' - ' + p.lostReason : '');
+    const newWs = XLSX.utils.aoa_to_sheet(rows);
+    const newWb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(newWb, newWs, 'Client Records');
+    if (wb.Sheets['Notes Log']) XLSX.utils.book_append_sheet(newWb, wb.Sheets['Notes Log'], 'Notes Log');
+    const out = XLSX.write(newWb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${sheetId}?uploadType=media`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, body: blob
+    });
+    showToast('Moved to Lost folder');
+  } catch (e) {
+    showToast('\u26A0\uFE0F Folder move failed — ' + e.message);
+  }
 }
 
 function updateFollowUp(id, dateVal) {
@@ -557,6 +1599,25 @@ function updateFollowUp(id, dateVal) {
   if (!p) return;
   p.nextFollowUp = dateVal || null;
   saveTracker();
+}
+
+// Deliberately avoids a full render() — that would rebuild every card from
+// scratch and collapse whichever detail panel is currently open. Patches
+// only the visible header text that could have changed instead.
+function updateField(id, field, value) {
+  const p = findProspect(id);
+  if (!p) return;
+  p[field] = (value || '').trim();
+  saveTracker();
+  if (p.clientId && CLIENT_RECORD_SYNCED_FIELDS.has(field)) queueClientRecordSync(p);
+  const detail = document.getElementById('detail-' + id);
+  const card = detail ? detail.closest('.p-card') : null;
+  if (card) {
+    const nameEl = card.querySelector('.p-company');
+    const metaEl = card.querySelector('.p-meta');
+    if (nameEl) nameEl.textContent = p.company;
+    if (metaEl) metaEl.textContent = `${p.state}${p.bdm ? ' · ' + p.bdm : ''}${p.contactName ? ' · ' + p.contactName : ''}`;
+  }
 }
 
 // =====================================================================
@@ -581,6 +1642,11 @@ function confirmMarkLost() {
     p.lostReason = reason;
     p.lostDate = todayStr();
     saveTracker();
+    if (p.clientId) {
+      ensureToken().then(() => moveClientFolderOnLost(p)).catch(() => {
+        showToast('\u26A0\uFE0F Could not move folder to Lost \u2014 mark it again to retry');
+      });
+    }
   }
   closeLostModal();
   render();
@@ -592,6 +1658,29 @@ function confirmMarkLost() {
 function promoteToClient(id) {
   const p = findProspect(id);
   if (!p) return;
+  // Once a Client ID exists (minted via Generate Quote), this is now a
+  // real client record — open it in normal edit mode so nothing gets
+  // duplicated. Only use the prefill-only path for a lead that's never
+  // had a quote generated and has no Client ID yet.
+  if (p.clientId) {
+    // Hard gate — Customer ✓ and the Prospects→Clients folder move only
+    // ever fire from the Won status change, never from completing the
+    // client form itself. A soft "OK to bypass" warning here got read
+    // backwards in practice — OK looked like "got it, I'll go do that"
+    // when it actually meant "skip that and proceed anyway." Now a real
+    // stop: no navigation happens at all until Won is actually set, and
+    // there's no button here to misread either way.
+    if (p.status !== 'Won') {
+      alert(
+        `${p.company} needs to be marked Won before completing client details.\n\n` +
+        `Use the Status dropdown on this card to set it to Won \u2014 you'll be ` +
+        `offered a direct link straight through to the client form right after.`
+      );
+      return;
+    }
+    window.location.href = `${PROSPECT_FORM_URL}/?client=${encodeURIComponent(p.clientId)}&name=${encodeURIComponent(p.company)}`;
+    return;
+  }
   const params = new URLSearchParams({
     promote: '1',
     company: p.company || '',
@@ -613,6 +1702,46 @@ function setStateFilter(s) {
   render();
 }
 
+function setBdmFilter(name) {
+  bdmFilter = name;
+  render();
+}
+
+// Clicking the already-active stage clears the filter, same toggle pattern
+// as the state pills.
+function setStageFilter(s) {
+  stageFilter = (stageFilter === s) ? 'ALL' : s;
+  render();
+}
+
+function renderStageStrip(counts) {
+  const strip = document.getElementById('stageStrip');
+  if (!strip) return;
+  const stages = STATUS_ORDER.filter(s => s !== 'Lost');
+  strip.innerHTML = stages.map(s =>
+    `<button class="filter-pill${stageFilter===s?' active':''}" onclick="setStageFilter('${s}')">${s} (${counts[s]||0})</button>`
+  ).join('');
+}
+
+// "Acting as" changes who new leads get assigned to — persisted per browser
+// so it doesn't reset every visit. Deliberately does not touch existing
+// prospects' bdm field, only the default for anything added from here on.
+function setCurrentBDM(name) {
+  currentBDM = name;
+  sessionStorage.setItem('bb_tracker_bdm', name);
+}
+
+function populateBdmDropdowns() {
+  const actingAs = document.getElementById('actingAsBDM');
+  const filterSelect = document.getElementById('bdmFilterSelect');
+  if (actingAs) {
+    actingAs.innerHTML = BDM_LIST.map(n => `<option value="${n}" ${n===currentBDM?'selected':''}>${n}</option>`).join('');
+  }
+  if (filterSelect) {
+    filterSelect.innerHTML = '<option value="ALL">All BDMs</option>' + BDM_LIST.map(n => `<option value="${n}">${n}</option>`).join('');
+  }
+}
+
 function setSearchFilter(v) {
   searchFilter = (v || '').trim().toLowerCase();
   render();
@@ -629,6 +1758,10 @@ function toggleLostSection() {
   document.getElementById('lostChevron').textContent = open ? '\u25BE' : '\u25B8';
 }
 
+function daysBetween(a, b) {
+  return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
+}
+
 function bucketFor(p) {
   if (!p.nextFollowUp) return 'nodate';
   if (p.nextFollowUp < todayStr()) return 'overdue';
@@ -643,10 +1776,10 @@ function statusOptionsHtml(current) {
 function cardHtml(p) {
   const accent = STATUS_COLORS[p.status] || '#64d2ff';
   const bucket = bucketFor(p);
-  const followUpClass = bucket === 'overdue' ? 'overdue' : bucket === 'today' ? 'today' : 'upcoming';
+  const followUpClass = bucket === 'overdue' ? 'overdue' : bucket === 'today' ? 'today' : bucket === 'nodate' ? 'nodate' : 'upcoming';
   const followUpLabel = p.nextFollowUp
-    ? (bucket === 'overdue' ? 'Overdue — was due ' : bucket === 'today' ? 'Due today' : 'Due ') + (bucket !== 'today' ? fmtDate(p.nextFollowUp) : '')
-    : 'No follow-up set';
+    ? (bucket === 'overdue' ? `Overdue by ${daysBetween(p.nextFollowUp, todayStr())} day${daysBetween(p.nextFollowUp, todayStr())!==1?'s':''}` : bucket === 'today' ? 'Due today' : 'Due ' + fmtDate(p.nextFollowUp))
+    : (p.createdDate ? `No follow-up set \u2014 added ${daysBetween(p.createdDate, todayStr())} day${daysBetween(p.createdDate, todayStr())!==1?'s':''} ago` : 'No follow-up set');
   const activityHtml = (p.activity || []).slice().reverse().map(a => `
     <div class="activity-entry">
       <div class="activity-date">${fmtDate(a.date)}</div>
@@ -658,12 +1791,164 @@ function cardHtml(p) {
     <div class="p-card-top" onclick="toggleCard('${p.id}')">
       <div>
         <div class="p-company">${escapeHtml(p.company)}</div>
-        <div class="p-meta">${p.state}${p.contactName ? ' · ' + escapeHtml(p.contactName) : ''}</div>
+        <div class="p-meta">${p.state}${p.bdm ? ' · ' + escapeHtml(p.bdm) : ''}${p.contactName ? ' · ' + escapeHtml(p.contactName) : ''}</div>
         <div class="p-followup ${followUpClass}">${followUpLabel}</div>
       </div>
       <div class="p-status-badge">${p.status}</div>
     </div>
     <div class="p-detail" id="detail-${p.id}">
+      <div class="p-field-row">
+        <div>
+          <label>Company</label>
+          <input type="text" value="${escapeHtml(p.company)}" onchange="updateField('${p.id}','company',this.value)">
+        </div>
+        <div>
+          <label>State</label>
+          <select onchange="updateField('${p.id}','state',this.value)">
+            <option value="WA" ${p.state==='WA'?'selected':''}>WA</option>
+            <option value="NT" ${p.state==='NT'?'selected':''}>NT</option>
+          </select>
+        </div>
+      </div>
+      <div class="p-field-row">
+        <div>
+          <label>Street address</label>
+          <input type="text" value="${escapeHtml(p.streetAddress||'')}" onchange="updateField('${p.id}','streetAddress',this.value)">
+        </div>
+        <div>
+          <label>Suburb</label>
+          <input type="text" value="${escapeHtml(p.suburb||'')}" onchange="updateField('${p.id}','suburb',this.value)">
+        </div>
+      </div>
+      <div class="p-field-row">
+        <div>
+          <label>Postcode</label>
+          <input type="text" value="${escapeHtml(p.postcode||'')}" onchange="updateField('${p.id}','postcode',this.value)">
+        </div>
+        <div></div>
+      </div>
+      <div class="p-field-row">
+        <div>
+          <label>Descriptor (site type)</label>
+          <select onchange="updateField('${p.id}','descriptor',this.value)">
+            <option value="" ${!p.descriptor?'selected':''}>Select...</option>
+            ${['Depot','Mine','Office','Other','Outside Payment Terminal (Unmanned)','Port','Reseller Customer Site','Service Station','Site','Store','Terminal','Warehouse','Workshop','Yard'].map(opt =>
+              `<option ${p.descriptor===opt?'selected':''}>${opt}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>BDM</label>
+          <select onchange="updateField('${p.id}','bdm',this.value)">
+            ${BDM_LIST.map(n => `<option value="${n}" ${p.bdm===n?'selected':''}>${n}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div style="margin:12px 0 6px;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:rgba(255,255,255,0.35);">Sales info</div>
+      <div class="p-field-row">
+        <div>
+          <label>Product interest</label>
+          <input type="text" value="${escapeHtml(p.productInterest||'')}" onchange="updateField('${p.id}','productInterest',this.value)">
+        </div>
+        <div>
+          <label>Current supplier</label>
+          <input type="text" value="${escapeHtml(p.currentSupplier||'')}" onchange="updateField('${p.id}','currentSupplier',this.value)">
+        </div>
+      </div>
+      <div class="p-field-row">
+        <div>
+          <label>Est. volume (litres)</label>
+          <input type="number" min="0" value="${p.estimatedVolumeLitres||''}" placeholder="e.g. 5000" onchange="updateField('${p.id}','estimatedVolumeLitres',this.value)">
+        </div>
+        <div>
+          <label>Period</label>
+          <select onchange="updateField('${p.id}','estimatedVolumePeriod',this.value)">
+            <option value="month" ${p.estimatedVolumePeriod!=='annum'?'selected':''}>Per month</option>
+            <option value="annum" ${p.estimatedVolumePeriod==='annum'?'selected':''}>Per annum</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin:12px 0 6px;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:rgba(255,255,255,0.35);">Site contact</div>
+      <div class="p-field-row">
+        <div>
+          <label>Name</label>
+          <input type="text" value="${escapeHtml(p.contactName||'')}" onchange="updateField('${p.id}','contactName',this.value)">
+        </div>
+        <div>
+          <label>Role</label>
+          <input type="text" value="${escapeHtml(p.contactRole||'')}" placeholder="e.g. Fleet Manager" onchange="updateField('${p.id}','contactRole',this.value)">
+        </div>
+      </div>
+      <div class="p-field-row">
+        <div>
+          <label>Phone</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="text" value="${escapeHtml(p.contactPhone||'')}" onchange="updateField('${p.id}','contactPhone',this.value)" style="flex:1;">
+            <a href="#" onclick="callPhoneField(this);return false;" title="Call" style="flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(74,222,128,0.12);color:#4ADE80;text-decoration:none;font-size:15px;">\uD83D\uDCDE</a>
+          </div>
+        </div>
+        <div>
+          <label>Email</label>
+          <input type="text" value="${escapeHtml(p.contactEmail||'')}" onchange="updateField('${p.id}','contactEmail',this.value)">
+        </div>
+      </div>
+      ${p.contactName ? `<button class="qa-btn" style="width:100%;margin-bottom:4px;" onclick="saveContactVCard('${p.id}',1)">\uD83D\uDCC7 Save Site Contact to phone</button>` : ''}
+      <div style="margin:12px 0 6px;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:rgba(255,255,255,0.35);">Key decision maker (optional)</div>
+      <div class="p-field-row">
+        <div>
+          <label>Name</label>
+          <input type="text" value="${escapeHtml(p.contact2Name||'')}" onchange="updateField('${p.id}','contact2Name',this.value)">
+        </div>
+        <div>
+          <label>Role</label>
+          <input type="text" value="${escapeHtml(p.contact2Role||'')}" placeholder="e.g. Site Manager" onchange="updateField('${p.id}','contact2Role',this.value)">
+        </div>
+      </div>
+      <div class="p-field-row">
+        <div>
+          <label>Phone</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="text" value="${escapeHtml(p.contact2Phone||'')}" onchange="updateField('${p.id}','contact2Phone',this.value)" style="flex:1;">
+            <a href="#" onclick="callPhoneField(this);return false;" title="Call" style="flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(74,222,128,0.12);color:#4ADE80;text-decoration:none;font-size:15px;">\uD83D\uDCDE</a>
+          </div>
+        </div>
+        <div>
+          <label>Email</label>
+          <input type="text" value="${escapeHtml(p.contact2Email||'')}" onchange="updateField('${p.id}','contact2Email',this.value)">
+        </div>
+      </div>
+      ${p.contact2Name ? `<button class="qa-btn" style="width:100%;margin-bottom:4px;" onclick="saveContactVCard('${p.id}',2)">\uD83D\uDCC7 Save Key Decision Maker to phone</button>` : ''}
+      <div style="margin:12px 0 6px;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:rgba(255,255,255,0.35);">Other (optional)</div>
+      <div class="p-field-row">
+        <div>
+          <label>Label</label>
+          <input type="text" value="${escapeHtml(p.contact3Label||'')}" placeholder="e.g. Accounts, Broker" onchange="updateField('${p.id}','contact3Label',this.value)">
+        </div>
+        <div>
+          <label>Name</label>
+          <input type="text" value="${escapeHtml(p.contact3Name||'')}" onchange="updateField('${p.id}','contact3Name',this.value)">
+        </div>
+      </div>
+      <div class="p-field-row">
+        <div>
+          <label>Role</label>
+          <input type="text" value="${escapeHtml(p.contact3Role||'')}" placeholder="e.g. HSE Manager" onchange="updateField('${p.id}','contact3Role',this.value)">
+        </div>
+        <div></div>
+      </div>
+      <div class="p-field-row">
+        <div>
+          <label>Phone</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="text" value="${escapeHtml(p.contact3Phone||'')}" onchange="updateField('${p.id}','contact3Phone',this.value)" style="flex:1;">
+            <a href="#" onclick="callPhoneField(this);return false;" title="Call" style="flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(74,222,128,0.12);color:#4ADE80;text-decoration:none;font-size:15px;">\uD83D\uDCDE</a>
+          </div>
+        </div>
+        <div>
+          <label>Email</label>
+          <input type="text" value="${escapeHtml(p.contact3Email||'')}" onchange="updateField('${p.id}','contact3Email',this.value)">
+        </div>
+      </div>
+      ${p.contact3Name ? `<button class="qa-btn" style="width:100%;margin-bottom:4px;" onclick="saveContactVCard('${p.id}',3)">\uD83D\uDCC7 Save ${escapeHtml(p.contact3Label||'Other Contact')} to phone</button>` : ''}
       <div class="p-field-row">
         <div>
           <label>Status</label>
@@ -677,7 +1962,9 @@ function cardHtml(p) {
       <div class="quick-actions">
         <button class="qa-btn" onclick="quickLogCall('${p.id}')">\u260E\uFE0F Call made</button>
         <button class="qa-btn" onclick="quickLogEmail('${p.id}')">\u2709\uFE0F Email sent</button>
-        <button class="qa-btn promote" onclick="promoteToClient('${p.id}')">\u2192 Promote to client</button>
+        <button class="qa-btn" onclick="quickLogVisit('${p.id}')">\uD83E\uDD1D F2F visit</button>
+        <button class="qa-btn promote" onclick="generateQuote('${p.id}')">${p.clientId ? '\u2192 Open quote builder' : '\u2192 Generate quote'}</button>
+        <button class="qa-btn" onclick="promoteToClient('${p.id}')">Complete client details</button>
         <button class="qa-btn lost" onclick="openLostModal('${p.id}')">Mark lost</button>
       </div>
       <div class="activity-log">${activityHtml}</div>
@@ -697,6 +1984,8 @@ function escapeHtml(s) {
 function render() {
   const visible = prospects.filter(p => {
     if (stateFilter !== 'ALL' && p.state !== stateFilter) return false;
+    if (bdmFilter !== 'ALL' && p.bdm !== bdmFilter) return false;
+    if (stageFilter !== 'ALL' && p.status !== stageFilter) return false;
     if (searchFilter) {
       const haystack = (p.company + ' ' + (p.contactName || '')).toLowerCase();
       if (!haystack.includes(searchFilter)) return false;
@@ -706,10 +1995,36 @@ function render() {
   const active = visible.filter(p => p.status !== 'Lost');
   const lost   = visible.filter(p => p.status === 'Lost');
 
-  const overdue  = active.filter(p => bucketFor(p) === 'overdue');
-  const today    = active.filter(p => bucketFor(p) === 'today');
-  const upcoming = active.filter(p => bucketFor(p) === 'upcoming').sort((a,b) => a.nextFollowUp.localeCompare(b.nextFollowUp));
-  const nodate   = active.filter(p => bucketFor(p) === 'nodate');
+  // Stage strip counts reflect State/BDM/search but deliberately NOT the
+  // stage filter itself — otherwise selecting one stage would zero out the
+  // counts for every other stage, and there'd be no way to see them to
+  // switch. Lost is excluded here too, it has its own section below.
+  const forCounts = prospects.filter(p => {
+    if (stateFilter !== 'ALL' && p.state !== stateFilter) return false;
+    if (bdmFilter !== 'ALL' && p.bdm !== bdmFilter) return false;
+    if (searchFilter) {
+      const haystack = (p.company + ' ' + (p.contactName || '')).toLowerCase();
+      if (!haystack.includes(searchFilter)) return false;
+    }
+    return p.status !== 'Lost';
+  });
+  const stageCounts = {};
+  STATUS_ORDER.filter(s => s !== 'Lost').forEach(s => { stageCounts[s] = forCounts.filter(p => p.status === s).length; });
+  renderStageStrip(stageCounts);
+
+  // With a stage selected, sort every bucket newest-added-first instead of
+  // by follow-up urgency — you're already looking at one stage, so "what's
+  // most recent" matters more than "what's most overdue" within it. With
+  // no stage selected, keep the original urgency-first behaviour.
+  const byFollowUpAsc = (a,b) => a.nextFollowUp.localeCompare(b.nextFollowUp);
+  const byCreatedOldest = (a,b) => (a.createdDate||'').localeCompare(b.createdDate||'');
+  const byCreatedNewest = (a,b) => (b.createdDate||'').localeCompare(a.createdDate||'');
+  const stageActive = stageFilter !== 'ALL';
+
+  const overdue  = active.filter(p => bucketFor(p) === 'overdue').sort(stageActive ? byCreatedNewest : byFollowUpAsc);
+  const today    = active.filter(p => bucketFor(p) === 'today').sort(stageActive ? byCreatedNewest : (() => 0));
+  const upcoming = active.filter(p => bucketFor(p) === 'upcoming').sort(stageActive ? byCreatedNewest : byFollowUpAsc);
+  const nodate   = active.filter(p => bucketFor(p) === 'nodate').sort(stageActive ? byCreatedNewest : byCreatedOldest);
 
   const section = (label, cls, list) => {
     if (!list.length) return '';
@@ -720,7 +2035,11 @@ function render() {
   const dash = document.getElementById('dashboard');
   const html = section('Overdue','overdue',overdue) + section('Due today','today',today) +
                section('Upcoming','upcoming',upcoming) + section('No follow-up set','nodate',nodate);
-  dash.innerHTML = html || '<div class="empty-note">No active prospects yet — add one above, or tap Load if you already have some in Drive.</div>';
+  const filterActive = stateFilter !== 'ALL' || bdmFilter !== 'ALL' || stageFilter !== 'ALL' || !!searchFilter;
+  const emptyMsg = filterActive
+    ? `No prospects match ${searchFilter ? `"${searchFilter}"` : 'that filter'} — try clearing the search or switching filters.`
+    : 'No active prospects yet — add one above, or tap Load if you already have some in Drive.';
+  dash.innerHTML = html || `<div class="empty-note">${emptyMsg}</div>`;
 
   document.getElementById('lostCount').textContent = lost.length;
   document.getElementById('lostWrap').innerHTML = lost.length
@@ -728,6 +2047,7 @@ function render() {
     : '<div class="empty-note">Nothing marked lost yet</div>';
 }
 
+populateBdmDropdowns();
 render();
 </script>
 </body>
