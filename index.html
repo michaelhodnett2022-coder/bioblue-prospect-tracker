@@ -217,7 +217,7 @@ body {
 <div class="header">
   <div class="logo-wrap"><div class="logo-dot"></div><div class="logo-text">BIOBLUE</div></div>
   <h1>Prospect Tracker</h1>
-  <p>Cold-call lead tracking · WA &amp; NT</p>
+  <p>Cold-call lead tracking · All states</p>
 </div>
 
 <div class="auth-bar">
@@ -239,9 +239,6 @@ body {
 <div style="text-align:center;margin-bottom:16px;">
   <span onclick="openImportPicker()" style="font-size:11px;color:rgba(255,255,255,0.45);text-decoration:underline;cursor:pointer;">Import existing Prospect/Client records</span>
   <span onclick="resyncAllToClientRecords()" style="font-size:11px;color:rgba(255,255,255,0.45);text-decoration:underline;cursor:pointer;margin-left:14px;">Resync all to Client Records</span>
-  <div id="migrateFromTestWrap" style="display:none;margin-top:10px;">
-    <span onclick="migrateFromTest()" style="font-size:11px;color:#fbbf24;text-decoration:underline;cursor:pointer;">Migrate leads from TEST (one-off)</span>
-  </div>
 </div>
 
 <div class="new-lead-card">
@@ -251,10 +248,7 @@ body {
   <div class="new-lead-fields" id="newLeadFields">
     <input type="text" id="nlCompany" placeholder="Company name">
     <div class="new-lead-row">
-      <select id="nlState">
-        <option value="WA">WA</option>
-        <option value="NT">NT</option>
-      </select>
+      <select id="nlState"></select>
       <input type="text" id="nlContactName" placeholder="Contact name (optional)">
     </div>
     <div class="new-lead-row">
@@ -270,9 +264,9 @@ body {
 </div>
 
 <div class="filter-bar">
-  <button class="filter-pill active" data-state="ALL" onclick="setStateFilter('ALL')">All</button>
-  <button class="filter-pill" data-state="WA" onclick="setStateFilter('WA')">WA</button>
-  <button class="filter-pill" data-state="NT" onclick="setStateFilter('NT')">NT</button>
+  <select id="stateFilterSelect" onchange="setStateFilter(this.value)" style="padding:6px 10px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.7);font-size:12px;font-weight:700;font-family:'DM Sans',sans-serif;">
+    <option value="ALL">All states</option>
+  </select>
   <select id="bdmFilterSelect" onchange="setBdmFilter(this.value)" style="padding:6px 10px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.7);font-size:12px;font-weight:700;font-family:'DM Sans',sans-serif;">
     <option value="ALL">All BDMs</option>
   </select>
@@ -359,6 +353,10 @@ const BDM_EMAILS = {
   'Brad Ryan':         'brad@bioblue.com.au',
 };
 const BDM_LIST = Object.keys(BDM_EMAILS);
+
+// National roll-out: every state/territory, one list used by the new-lead
+// picker, the state filter and the card dropdown so they can't drift apart.
+const STATES = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA'];
 
 let gdriveToken = null;
 let trackerFileId = null;
@@ -465,9 +463,8 @@ async function getOrCreateFolder(parentId, name) {
   catch (e) { delete _folderCache[key]; throw e; }
 }
 
-// LIVE: a brand-new live tracker file starts empty. Real leads come across
-// once via migrateFromTest() below. The old TEST starter list is kept only
-// as an unused reference (it returns before reaching it).
+// LIVE: a brand-new live tracker file starts empty. The old TEST starter
+// list is kept only as an unused reference (it returns before reaching it).
 function getSeedProspects() {
   return [];
   const today = todayStr();
@@ -800,7 +797,7 @@ function inferStatusFromRecord(get) {
 // more than once never creates duplicates.
 // Points at the REAL production Drive folder. In this live file it matches
 // GDRIVE_FOLDER_NAME; kept as its own constant because the read-only import
-// path below and migrateFromTest() must never create anything.
+// path below must never create anything.
 const PRODUCTION_FOLDER_NAME = 'BioBlue Audits';
 
 // Read-only, and deliberately the opposite of getOrCreateFolder's
@@ -919,7 +916,7 @@ function mapRowToProspect(get, clientId) {
     id: uid(),
     clientId: clientId,
     company: get('Billing Entity'),
-    state: get('State') || 'WA',
+    state: get('State') || '',
     bdm: bdmNameFromEmail(get('BDM Email')),
     descriptor: get('Descriptor'),
     streetAddress: get('Street Address'),
@@ -1166,7 +1163,6 @@ async function fetchAndMergeProspects() {
   prospects = [...localOnly, ...driveProspects];
   setAuthStatus(`\u2705 ${prospects.length} prospect${prospects.length!==1?'s':''} loaded`);
   render();
-  updateMigrateVisibility();
 }
 
 // Explicit Load button — connect if needed, then always refresh, so it
@@ -1245,132 +1241,6 @@ async function manualSave() {
 }
 
 // =====================================================================
-// ONE-OFF MIGRATION FROM TEST — brings the leads built up in the TEST
-// tracker across into this live file. The app has to do this itself:
-// with the drive.file scope it can only see files it created, so a JSON
-// copied by hand in the Drive website would be invisible here.
-// Safety rules:
-//  - Read-only against TEST (never creates or edits anything there).
-//  - Only offered while live holds no real leads (empty, or only the
-//    old v1 starter list). Refuses otherwise, so it can never overwrite.
-//  - A Client ID minted in TEST only exists in TEST's Client Records. In
-//    live that number is either missing or belongs to a different client,
-//    and live sync would overwrite that client's row. So an ID is kept
-//    only if live Client Records has that ID with the same company name;
-//    otherwise it's cleared and re-minted later via Generate Quote.
-//  - Shows a summary and writes nothing until confirmed.
-// Remove this block in the next version once migration is done.
-// =====================================================================
-const TEST_FOLDER_NAME = 'BioBlue Audits - TESTING';
-const OLD_STARTER_COMPANIES = new Set(['varley transport','valley transport','sands refrigeration','fenix','mcman bennett','flexi trans','swan transit']);
-
-function normName(s) { return (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' '); }
-
-function liveHasOnlyStarterLeads() {
-  return prospects.every(p => !p.clientId && OLD_STARTER_COMPANIES.has(normName(p.company)));
-}
-
-function updateMigrateVisibility() {
-  const wrap = document.getElementById('migrateFromTestWrap');
-  if (wrap) wrap.style.display = liveHasOnlyStarterLeads() ? 'block' : 'none';
-}
-
-// Read-only lookup: returns the ID or throws. Never creates.
-async function findDriveItemId(query, label) {
-  const r = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query + ' and trashed=false')}&fields=files(id)`,
-    { headers: { Authorization: `Bearer ${gdriveToken}` } }
-  );
-  if (!r.ok) throw new Error(`${label} lookup failed (${r.status})`);
-  const d = await r.json();
-  if (!d.files || !d.files.length) throw new Error(`${label} not found`);
-  return d.files[0].id;
-}
-
-async function readTestTrackerLeads() {
-  const FOLDER = "mimeType='application/vnd.google-apps.folder'";
-  const rootId    = await findDriveItemId(`name='${TEST_FOLDER_NAME}' and ${FOLDER}`, 'TEST root folder');
-  const adminId   = await findDriveItemId(`name='ADMIN DATA - DO NOT REMOVE' and '${rootId}' in parents and ${FOLDER}`, 'TEST ADMIN DATA folder');
-  const trackerId = await findDriveItemId(`name='${TRACKER_SUBFOLDER}' and '${adminId}' in parents and ${FOLDER}`, 'TEST Prospect Tracker Data folder');
-  const fileId    = await findDriveItemId(`name='${TRACKER_FILE_NAME}' and '${trackerId}' in parents`, 'TEST tracker file');
-  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
-  if (!dl.ok) throw new Error('TEST tracker download failed (' + dl.status + ')');
-  const text = await dl.text();
-  const list = text.trim() ? JSON.parse(text) : [];
-  if (!Array.isArray(list)) throw new Error('TEST tracker file is not a lead list');
-  return list;
-}
-
-async function migrateFromTest() {
-  try {
-    showToast('Checking live and TEST data...');
-    const ok = await ensureConnected();
-    if (!ok) throw new Error('Could not connect to Drive');
-    await fetchAndMergeProspects();   // always judge against the latest live copy
-    if (!liveHasOnlyStarterLeads()) {
-      alert('Migration stopped: the live tracker already holds real leads, so nothing was changed.');
-      updateMigrateVisibility();
-      return;
-    }
-
-    const testLeads = await readTestTrackerLeads();
-    if (!testLeads.length) { alert('The TEST tracker has no leads to migrate. Nothing was changed.'); return; }
-
-    // Live Client Records: ID -> company, read-only
-    const rows = await getProductionClientRecordsRows();
-    const headers = rows[0] || [];
-    const idCol = headers.indexOf('Client ID');
-    const nameCol = headers.indexOf('Billing Entity');
-    if (idCol === -1 || nameCol === -1) throw new Error('Live Client Records is missing the Client ID or Billing Entity column');
-    const liveIds = new Map();
-    rows.slice(1).forEach(r => { if (r[idCol]) liveIds.set(String(r[idCol]).trim(), normName(r[nameCol])); });
-
-    let kept = 0;
-    const cleared = [];
-    const seen = new Set();
-    const migrated = [];
-    testLeads.forEach(src => {
-      if (!src || !src.id || seen.has(src.id)) return;
-      seen.add(src.id);
-      const p = JSON.parse(JSON.stringify(src));
-      if (!Array.isArray(p.activity)) p.activity = [];
-      if (p.clientId) {
-        const liveName = liveIds.get(String(p.clientId).trim());
-        if (liveName !== undefined && liveName === normName(p.company)) {
-          kept++;
-        } else {
-          cleared.push(`${p.company || '(no name)'} (${p.clientId})`);
-          p.activity.push({ date: todayStr(), type: 'note', text: `Client ID ${p.clientId} was TEST-only and cleared on migration to live — re-mint via Generate Quote` });
-          p.clientId = null;
-        }
-      }
-      migrated.push(p);
-    });
-
-    const replacing = prospects.length;
-    const summary =
-      `Migrate ${migrated.length} lead${migrated.length!==1?'s':''} from TEST into the live tracker?\n\n` +
-      `• Client IDs kept (match live Client Records): ${kept}\n` +
-      `• Client IDs cleared (TEST-only): ${cleared.length}` +
-      (cleared.length ? `\n   ${cleared.slice(0, 8).join('\n   ')}${cleared.length > 8 ? `\n   ...and ${cleared.length - 8} more` : ''}` : '') +
-      (replacing ? `\n• Old starter leads in live to be replaced: ${replacing}` : '') +
-      `\n\nNothing in TEST is changed. Live Client Records is not touched.`;
-    if (!confirm(summary)) { showToast('Migration cancelled — nothing changed'); return; }
-
-    const before = prospects;
-    prospects = migrated;
-    const saved = await saveTracker();
-    if (!saved) prospects = before;   // don't leave unsaved migrated leads mixed in memory
-    render();
-    updateMigrateVisibility();
-    if (saved) showToast(`✅ Migrated ${migrated.length} lead${migrated.length!==1?'s':''} to live`);
-    else alert('Migration could not be saved to Drive, so nothing was changed. Tap Load, then run the migration again.');
-  } catch (e) {
-    alert('Migration stopped — ' + e.message + '\n\nNothing was changed.');
-  }
-}
-
-// =====================================================================
 // NEW LEAD
 // =====================================================================
 function toggleNewLead() {
@@ -1382,6 +1252,7 @@ function toggleNewLead() {
 function addNewLead() {
   const company = document.getElementById('nlCompany').value.trim();
   if (!company) { showToast('Company name is required'); return; }
+  if (!document.getElementById('nlState').value) { showToast('Select a state for this lead'); return; }
   const p = {
     id: uid(),
     company,
@@ -1698,7 +1569,6 @@ function promoteToClient(id) {
 // =====================================================================
 function setStateFilter(s) {
   stateFilter = s;
-  document.querySelectorAll('.filter-pill').forEach(el => el.classList.toggle('active', el.dataset.state === s));
   render();
 }
 
@@ -1740,6 +1610,13 @@ function populateBdmDropdowns() {
   if (filterSelect) {
     filterSelect.innerHTML = '<option value="ALL">All BDMs</option>' + BDM_LIST.map(n => `<option value="${n}">${n}</option>`).join('');
   }
+}
+
+function populateStateDropdowns() {
+  const nl = document.getElementById('nlState');
+  const filterSelect = document.getElementById('stateFilterSelect');
+  if (nl) nl.innerHTML = '<option value="">State...</option>' + STATES.map(st => `<option value="${st}">${st}</option>`).join('');
+  if (filterSelect) filterSelect.innerHTML = '<option value="ALL">All states</option>' + STATES.map(st => `<option value="${st}">${st}</option>`).join('');
 }
 
 function setSearchFilter(v) {
@@ -1805,8 +1682,8 @@ function cardHtml(p) {
         <div>
           <label>State</label>
           <select onchange="updateField('${p.id}','state',this.value)">
-            <option value="WA" ${p.state==='WA'?'selected':''}>WA</option>
-            <option value="NT" ${p.state==='NT'?'selected':''}>NT</option>
+            ${p.state ? '' : '<option value="" selected>Select...</option>'}
+            ${STATES.map(st => `<option value="${st}" ${p.state===st?'selected':''}>${st}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -2048,6 +1925,7 @@ function render() {
 }
 
 populateBdmDropdowns();
+populateStateDropdowns();
 render();
 </script>
 </body>
