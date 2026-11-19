@@ -203,6 +203,15 @@ body {
   opacity:0;transition:opacity 0.3s;z-index:300;pointer-events:none;max-width:90%;text-align:center;
 }
 .toast.show { opacity:1; }
+.undo-bar {
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%);display:none;align-items:center;gap:14px;
+  background:#0a2a4a;border:1px solid rgba(255,255,255,0.25);padding:10px 16px;border-radius:10px;font-size:12.5px;z-index:310;max-width:92%;
+}
+.undo-bar.show { display:flex; }
+.undo-bar button { background:#64d2ff;color:#001f3f;border:none;border-radius:8px;padding:6px 12px;font-weight:800;font-size:12px;cursor:pointer; }
+.remove-row { margin-top:14px;text-align:right; }
+.remove-link { font-size:11.5px;color:#f87171;text-decoration:underline;cursor:pointer;background:none;border:none;font-family:inherit; }
+.remove-blocked { font-size:11px;color:rgba(255,255,255,0.45); }
 
 /* COLD / PIPELINE VIEWS */
 .view-tabs { display:flex;gap:8px;margin-bottom:14px; }
@@ -260,6 +269,7 @@ body {
 </div>
 
 <div class="tool-links">
+  <span onclick="importFromDrive()" style="color:#64d2ff;font-weight:700;">&#9729;&#65039; Import from Drive</span>
   <span onclick="openPasteResearch()">&#128203; Paste research</span>
   <span onclick="document.getElementById('researchFileInput').click()">&#8679; Import research file</span>
   <span onclick="openExclusionList()">Copy exclusion list for research</span>
@@ -348,6 +358,28 @@ body {
     </div>
   </div>
 </div>
+
+<div class="modal-overlay" id="removeModal">
+  <div class="modal-box">
+    <h3>Remove from Tracker</h3>
+    <div id="removeModalName" style="font-size:12.5px;opacity:0.8;margin-bottom:10px;"></div>
+    <select id="removeReasonSelect">
+      <option value="">Select a reason...</option>
+      <option value="Duplicate">Duplicate</option>
+      <option value="Entered by mistake">Entered by mistake</option>
+      <option value="No longer trading">No longer trading</option>
+      <option value="Not a fit">Not a fit</option>
+      <option value="Other">Other</option>
+    </select>
+    <div style="font-size:11px;opacity:0.6;margin-top:8px;">It disappears from every list, but is remembered so research won't suggest it again.</div>
+    <div class="modal-btn-row">
+      <button class="btn btn-ghost" onclick="closeRemoveModal()">Cancel</button>
+      <button class="btn btn-primary" style="background:#f87171;color:#2a0a0a;" onclick="confirmRemoveLead()">Remove</button>
+    </div>
+  </div>
+</div>
+
+<div class="undo-bar" id="undoBar"><span id="undoText"></span><button onclick="undoRemoveLead()">Undo</button></div>
 
 <div class="modal-overlay" id="lostModal">
   <div class="modal-box">
@@ -1188,7 +1220,7 @@ async function importResearchRows(rows, sourceLabel) {
       const k = leadKey(p.company, p.suburb);
       const sameName = existingNames.get(normKey(p.company));
       const match = existing.get(k) || (sameName && (!p.suburb || !sameName.suburb) ? sameName : null);
-      if (match) { skipped.push(`${p.company} (${match.status === THROWN_BACK ? 'marked N before' : 'already in Tracker'})`); return; }
+      if (match) { skipped.push(`${p.company} (${match.status === THROWN_BACK ? 'marked N before' : match.status === REMOVED ? 'removed before' : 'already in Tracker'})`); return; }
       existing.set(k, p);
       if (!existingNames.has(normKey(p.company))) existingNames.set(normKey(p.company), p);
       (keep ? kept : thrown).push(p);
@@ -1219,6 +1251,102 @@ async function importResearchRows(rows, sourceLabel) {
     if (kept.length) geocodeMissing(kept).then(n => { if (n) saveTracker(); }).catch(() => {});
     showToast(`✅ ${kept.length} lead${kept.length !== 1 ? 's' : ''} added to Cold`);
     return true;
+}
+
+// IMPORT FROM DRIVE — Google's own file picker. Picking a file is what
+// grants this app (drive.file scope) access to that one file; nothing
+// else in Drive becomes visible. The picker opens on research sheets
+// whose name contains "Research Inbox"; once a file is imported it is
+// renamed "Imported - ..." so it drops out of that list.
+const PICKER_API_KEY = 'AIzaSyCD81186Xvp0GUZO1Szwm1dydrReKQB-P0';
+const PICKER_APP_ID = '49055725643';   // Cloud project number (same project as the sign-in client)
+const RESEARCH_PREFIX = 'Research Inbox';
+const MIME_SHEET = 'application/vnd.google-apps.spreadsheet';
+const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+let _pickerPromise = null;
+
+function loadPicker() {
+  if (window.google && window.google.picker) return Promise.resolve();
+  if (_pickerPromise) return _pickerPromise;
+  _pickerPromise = new Promise((resolve, reject) => {
+    const done = () => window.gapi.load('picker', { callback: resolve, onerror: () => { _pickerPromise = null; reject(new Error('Google file picker did not load')); } });
+    if (window.gapi && window.gapi.load) { done(); return; }
+    const sc = document.createElement('script');
+    sc.src = 'https://apis.google.com/js/api.js';
+    sc.async = true;
+    sc.onload = done;
+    sc.onerror = () => { _pickerPromise = null; reject(new Error('Google file picker did not load — check your signal')); };
+    document.head.appendChild(sc);
+  });
+  return _pickerPromise;
+}
+
+async function importFromDrive() {
+  try {
+    const ok = await ensureConnected();
+    if (!ok) throw new Error('Could not connect to Drive');
+    await loadPicker();
+    const types = [MIME_SHEET, MIME_XLSX, 'text/csv'].join(',');
+    const inbox = new google.picker.DocsView(google.picker.ViewId.DOCS).setMimeTypes(types).setIncludeFolders(false);
+    if (typeof inbox.setQuery === 'function') inbox.setQuery(RESEARCH_PREFIX);
+    const allSheets = new google.picker.DocsView(google.picker.ViewId.DOCS).setMimeTypes(types).setIncludeFolders(true);
+    const picker = new google.picker.PickerBuilder()
+      .setTitle('Pick a research sheet to import')
+      .addView(inbox)
+      .addView(allSheets)
+      .setOAuthToken(gdriveToken)
+      .setDeveloperKey(PICKER_API_KEY)
+      .setAppId(PICKER_APP_ID)
+      .setOrigin(window.location.protocol + '//' + window.location.host)
+      .setCallback(onResearchPicked)
+      .build();
+    picker.setVisible(true);
+  } catch (e) {
+    alert('Import from Drive stopped — ' + e.message + '\n\nNothing was changed. Paste research still works in the meantime.');
+  }
+}
+
+async function onResearchPicked(data) {
+  if (data[google.picker.Response.ACTION] !== google.picker.Action.PICKED) return;
+  const doc = (data[google.picker.Response.DOCUMENTS] || [])[0];
+  if (!doc) return;
+  const fileId = doc[google.picker.Document.ID];
+  const name = doc[google.picker.Document.NAME] || 'research sheet';
+  const mime = doc[google.picker.Document.MIME_TYPE] || '';
+  try {
+    showToast('Reading ' + name + '...');
+    const url = mime === MIME_SHEET
+      ? `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(MIME_XLSX)}`
+      : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+    if (!r.ok) throw new Error(r.status === 401 ? 'your Google sign-in has expired — tap Load, then try again' : `could not read the file (${r.status})`);
+    let rows;
+    if (mime === 'text/csv') {
+      rows = parseDelimited(await r.text());
+    } else {
+      const wb = XLSX.read(new Uint8Array(await r.arrayBuffer()), { type: 'array' });
+      const sheetName = wb.SheetNames.includes(IMPORT_SHEET) ? IMPORT_SHEET : wb.SheetNames[0];
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
+    }
+    const done = await importResearchRows(rows, `"${name}"`);
+    if (done) markResearchImported(fileId, name);
+  } catch (e) {
+    alert('Import from Drive stopped — ' + e.message + '\n\nNothing was changed.');
+  }
+}
+
+// Rename so the file drops out of the "Research Inbox" list. Best effort:
+// the leads are already saved, so a failed rename only means the file
+// still shows next time (re-importing it just skips known leads).
+async function markResearchImported(fileId, name) {
+  const newName = /^research inbox/i.test(name) ? name.replace(/^research inbox/i, 'Imported') : 'Imported - ' + name;
+  try {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName })
+    });
+  } catch (e) { /* non-fatal */ }
 }
 
 // PASTE RESEARCH — rows copied from Google Sheets / Excel arrive as
@@ -1279,7 +1407,7 @@ async function importPastedResearch() {
 function openExclusionList() {
   const lines = prospects
     .filter(p => p.company)
-    .map(p => `${p.company}${p.suburb ? ', ' + p.suburb : ''}${p.state ? ' ' + p.state : ''}${p.status === THROWN_BACK ? ' (marked N)' : ''}`)
+    .map(p => `${p.company}${p.suburb ? ', ' + p.suburb : ''}${p.state ? ' ' + p.state : ''}${p.status === THROWN_BACK ? ' (marked N)' : p.status === REMOVED ? ' (removed)' : ''}`)
     .sort((a, b) => a.localeCompare(b));
   document.getElementById('exclusionText').value = lines.length
     ? 'Exclude these companies (already in the Prospect Tracker or previously marked N):\n' + lines.join('\n')
@@ -1433,6 +1561,71 @@ function updateNearBar(keepInfo) {
 
 function directionsUrl(p) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.lat + ',' + p.lng)}`;
+}
+
+// =====================================================================
+// REMOVE FROM TRACKER — data clean-up (duplicates, mistakes, closed
+// businesses), not a sales outcome: Lost is for those. A removed lead is
+// hidden from every list and count, but kept as status 'Removed' so the
+// exclusion list and research imports still know about it. Blocked for any
+// lead with a Client ID: it has a Client Records row, Drive folder and
+// quote history behind it. Nothing outside the Tracker is touched.
+// =====================================================================
+const REMOVED = 'Removed';
+let _removeTargetId = null;
+let _undoRemove = null;   // { id, prevStatus, timer }
+
+function openRemoveModal(id) {
+  const p = findProspect(id);
+  if (!p) return;
+  if (p.clientId) { alert(`${p.company} has a Client ID (${p.clientId}) and history, so it can't be removed. Mark it Lost instead.`); return; }
+  _removeTargetId = id;
+  document.getElementById('removeModalName').textContent = p.company;
+  document.getElementById('removeReasonSelect').value = '';
+  document.getElementById('removeModal').classList.add('open');
+}
+function closeRemoveModal() {
+  _removeTargetId = null;
+  document.getElementById('removeModal').classList.remove('open');
+}
+function confirmRemoveLead() {
+  const reason = document.getElementById('removeReasonSelect').value;
+  if (!reason) { showToast('Select a reason first'); return; }
+  const p = findProspect(_removeTargetId);
+  closeRemoveModal();
+  if (!p || p.clientId) return;
+  const prevStatus = p.status;
+  p.status = REMOVED;
+  p.removedReason = reason;
+  p.removedDate = todayStr();
+  p.activity.push({ date: todayStr(), type: 'note', text: `Removed from Tracker by ${currentBDM} — ${reason}` });
+  saveTracker();
+  render();
+  showUndo(p, prevStatus);
+}
+function showUndo(p, prevStatus) {
+  if (_undoRemove) clearTimeout(_undoRemove.timer);
+  document.getElementById('undoText').textContent = `${p.company} removed`;
+  document.getElementById('undoBar').classList.add('show');
+  _undoRemove = { id: p.id, prevStatus, timer: setTimeout(hideUndo, 8000) };
+}
+function hideUndo() {
+  document.getElementById('undoBar').classList.remove('show');
+  _undoRemove = null;
+}
+function undoRemoveLead() {
+  if (!_undoRemove) return;
+  const p = findProspect(_undoRemove.id);
+  const prevStatus = _undoRemove.prevStatus;
+  clearTimeout(_undoRemove.timer);
+  hideUndo();
+  if (!p || p.status !== REMOVED) return;
+  p.status = prevStatus;
+  delete p.removedReason; delete p.removedDate;
+  p.activity.push({ date: todayStr(), type: 'note', text: `Remove undone by ${currentBDM}` });
+  saveTracker();
+  render();
+  showToast(`${p.company} restored`);
 }
 
 // =====================================================================
@@ -2059,6 +2252,9 @@ function cardHtml(p) {
       </div>
       ${p.lostReason ? `<div class="lost-reason-tag">Lost — ${escapeHtml(p.lostReason)}</div>` : ''}
       ${p.status === 'Won' && p.clientId ? `<div style="font-size:11px;color:#4ADE80;margin-top:8px;">Won \u2014 client details are now kept in the Prospect/Client form. Edits here no longer update Client Records.</div>` : ''}
+      <div class="remove-row">${p.clientId
+        ? `<span class="remove-blocked">Can't be removed \u2014 it has a Client ID (${escapeHtml(p.clientId)}) and history. Mark it Lost instead.</span>`
+        : `<button class="remove-link" onclick="openRemoveModal('${p.id}')">Remove from Tracker</button>`}</div>
     </div>
   </div>`;
 }
