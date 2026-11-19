@@ -204,16 +204,25 @@ body {
 }
 .toast.show { opacity:1; }
 
-/* SUGGESTED (research inbox) */
-.section-label.suggested { color:#c4b5fd; }
-.s-card { border-style:dashed !important; }
-.s-why { font-size:12px;opacity:0.8;margin-top:8px;line-height:1.4; }
-.s-source { font-size:11px;color:#a8d4f5;margin-top:4px;display:inline-block;word-break:break-all; }
-.s-actions { display:flex;gap:8px;margin-top:12px; }
-.s-actions .btn { flex:1; }
-.btn-keep { background:#4ADE80;color:#052e16; }
-.btn-throw { background:rgba(248,113,113,0.15);color:#f87171;border:1px solid #f87171; }
-.grade-badge { font-size:10px;font-weight:800;padding:2px 7px;border-radius:8px;background:#c4b5fd;color:#1e1b4b;margin-left:6px; }
+/* COLD / PIPELINE VIEWS */
+.view-tabs { display:flex;gap:8px;margin-bottom:14px; }
+.view-tab {
+  flex:1;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;padding:10px 8px;border-radius:10px;
+  border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.75);cursor:pointer;
+}
+.view-tab.active { background:#64d2ff;border-color:#64d2ff;color:#001f3f; }
+.view-tab small { display:block;font-size:10.5px;font-weight:500;opacity:0.75;margin-top:2px; }
+.section-label.cold { color:#94a3b8; }
+.section-label.near { color:#4ADE80; }
+.near-bar { display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap; }
+.near-btn { font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:8px 14px;border-radius:20px;border:1.5px solid #4ADE80;background:transparent;color:#4ADE80;cursor:pointer; }
+.near-btn.active { background:#4ADE80;color:#052e16; }
+.near-bar select { padding:7px 10px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.75);font-size:12px;font-weight:700;font-family:'DM Sans',sans-serif; }
+.near-bar select option { background:#003466;color:white; }
+.near-info { font-size:11px;color:rgba(255,255,255,0.6);flex-basis:100%; }
+.near-info span { text-decoration:underline;cursor:pointer;margin-left:6px; }
+.near-line { font-size:11.5px;font-weight:700;color:#4ADE80;margin-top:6px; }
+.near-line a { color:#a8d4f5;margin-left:8px; }
 .tool-links { text-align:center;margin-bottom:16px;display:flex;justify-content:center;gap:16px;flex-wrap:wrap; }
 .tool-links span { font-size:11px;color:rgba(255,255,255,0.55);text-decoration:underline;cursor:pointer; }
 </style>
@@ -278,6 +287,23 @@ body {
   <input type="text" id="searchBox" placeholder="Search prospects by company or contact..." oninput="setSearchFilter(this.value)" autocomplete="off">
 </div>
 
+<div class="view-tabs">
+  <button class="view-tab active" id="viewTabPipeline" onclick="setViewMode('pipeline')">Pipeline<small id="pipelineTabInfo">&nbsp;</small></button>
+  <button class="view-tab" id="viewTabCold" onclick="setViewMode('cold')">Cold<small id="coldTabInfo">&nbsp;</small></button>
+</div>
+
+<div class="near-bar">
+  <button class="near-btn" id="nearBtn" onclick="toggleNearMe()">&#128205; Near me</button>
+  <select id="nearRadius" onchange="setNearRadius(this.value)">
+    <option value="5">Within 5 km</option>
+    <option value="10" selected>Within 10 km</option>
+    <option value="25">Within 25 km</option>
+    <option value="50">Within 50 km</option>
+    <option value="all">Any distance</option>
+  </select>
+  <div class="near-info" id="nearInfo"></div>
+</div>
+
 <div class="filter-bar">
   <select id="stateFilterSelect" onchange="setStateFilter(this.value)" style="padding:6px 10px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.7);font-size:12px;font-weight:700;font-family:'DM Sans',sans-serif;">
     <option value="ALL">All states</option>
@@ -298,29 +324,10 @@ body {
 
 </div>
 
-<div class="modal-overlay" id="throwModal">
-  <div class="modal-box">
-    <h3>Throw back</h3>
-    <select id="throwReasonSelect">
-      <option value="">Select a reason...</option>
-      <option value="Too small">Too small</option>
-      <option value="Not a diesel fleet">Not a diesel fleet</option>
-      <option value="Already a client">Already a client</option>
-      <option value="Out of area">Out of area</option>
-      <option value="Duplicate">Duplicate</option>
-      <option value="Other">Other</option>
-    </select>
-    <div class="modal-btn-row">
-      <button class="btn btn-ghost" onclick="closeThrowModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="confirmThrowBack()">Throw back</button>
-    </div>
-  </div>
-</div>
-
 <div class="modal-overlay" id="exclusionModal">
   <div class="modal-box" style="max-width:440px;">
     <h3>Exclusion list for research</h3>
-    <div style="font-size:11.5px;opacity:0.7;margin-bottom:10px;">Every company already in the Tracker or thrown back. Paste it into your Researcher request so these are left out.</div>
+    <div style="font-size:11.5px;opacity:0.7;margin-bottom:10px;">Every company already in the Tracker, plus everything you marked N on import. Paste it into your Researcher request so these are left out.</div>
     <textarea id="exclusionText" readonly style="width:100%;height:220px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:white;font-family:'DM Mono',monospace;font-size:11px;padding:8px;"></textarea>
     <div class="modal-btn-row" style="margin-top:12px;">
       <button class="btn btn-ghost" onclick="closeExclusionList()">Close</button>
@@ -392,6 +399,8 @@ let prospects = [];
 let stateFilter = 'ALL';
 let bdmFilter = 'ALL';
 let stageFilter = 'ALL';
+// Pipeline = leads in motion (Contacted onward). Cold = New Leads never contacted yet.
+let viewMode = 'pipeline';
 let searchFilter = '';
 // "Acting as" — whichever BDM is using the app right now. Defaults new
 // leads to this person, persisted per-browser so it doesn't need resetting
@@ -1061,21 +1070,23 @@ async function manualSave() {
 
 // =====================================================================
 // RESEARCH IMPORT — the Researcher agent's Excel/CSV ("Tracker Import"
-// tab) loads here as SUGGESTED leads: outside the pipeline until a BDM
-// ticks Keep (-> New Lead) or Throw back (remembered, hidden, and listed
-// in the exclusion list so research never suggests it again).
-// Suggested / Thrown back leads have no Client ID, so nothing here ever
-// touches Client Records or the Notes Log.
+// tab). Michael decides at his desk in the IMPORT column:
+//   Y (or blank) -> imported as a New Lead into the Cold list
+//   N            -> not shown anywhere, but stored as 'Thrown back' so the
+//                   exclusion list keeps it out of future research
+// No Client ID is created, so nothing here touches Client Records or the
+// Notes Log.
 // =====================================================================
-const SUGGESTED = 'Suggested';
 const THROWN_BACK = 'Thrown back';
 const IMPORT_SHEET = 'Tracker Import';
+const PIPELINE_STATUSES = ['Contacted','Engaged','Quoted','Negotiating','Won'];
 
 function normKey(s) { return (s || '').toString().toLowerCase().replace(/[^a-z0-9]/g, ''); }
 function leadKey(company, suburb) { return normKey(company) + '|' + normKey(suburb); }
 
 // Header aliases -> Tracker field. Matching ignores case, spaces and punctuation.
 const IMPORT_COLUMNS = {
+  importFlag: ['import'],
   company: ['company','companyname','businessname'],
   state: ['state'],
   streetAddress: ['streetaddress','address','siteaddress'],
@@ -1100,27 +1111,36 @@ const IMPORT_COLUMNS = {
 };
 const DESCRIPTORS = ['Depot','Mine','Office','Other','Outside Payment Terminal (Unmanned)','Port','Reseller Customer Site','Service Station','Site','Store','Terminal','Warehouse','Workshop','Yard'];
 
-function rowToSuggested(row) {
+function rowToLead(row) {
   const byKey = {};
   Object.keys(row).forEach(h => { byKey[normKey(h)] = (row[h] === null || row[h] === undefined) ? '' : String(row[h]).trim(); });
   const get = field => { for (const a of IMPORT_COLUMNS[field]) { if (byKey[a]) return byKey[a]; } return ''; };
   const stateRaw = get('state').toUpperCase();
   const descRaw = get('descriptor');
-  const desc = DESCRIPTORS.find(d => d.toLowerCase() === descRaw.toLowerCase()) || '';
-  const vol = get('estimatedVolumeLitres').replace(/[^0-9.]/g, '');
+  const flag = get('importFlag').toUpperCase();
   const p = {
-    id: uid(), status: SUGGESTED, bdm: currentBDM,
+    id: uid(), status: 'New Lead', bdm: currentBDM,
     company: get('company'), state: STATES.includes(stateRaw) ? stateRaw : '',
     streetAddress: get('streetAddress'), suburb: get('suburb'), postcode: get('postcode'),
-    descriptor: desc, productInterest: get('productInterest'), currentSupplier: get('currentSupplier'),
-    estimatedVolumeLitres: vol, estimatedVolumePeriod: /ann|year/i.test(get('estimatedVolumePeriod')) ? 'annum' : 'month',
+    descriptor: DESCRIPTORS.find(d => d.toLowerCase() === descRaw.toLowerCase()) || '',
+    productInterest: get('productInterest'), currentSupplier: get('currentSupplier'),
+    estimatedVolumeLitres: get('estimatedVolumeLitres').replace(/[^0-9.]/g, ''),
+    estimatedVolumePeriod: /ann|year/i.test(get('estimatedVolumePeriod')) ? 'annum' : 'month',
     contactName: get('contactName'), contactRole: get('contactRole'), contactPhone: get('contactPhone'), contactEmail: get('contactEmail'),
     contact2Name: get('contact2Name'), contact2Role: get('contact2Role'), contact2Phone: get('contact2Phone'), contact2Email: get('contact2Email'),
     researchGrade: get('researchGrade').toUpperCase().slice(0, 1), researchWhy: get('researchWhy'), researchSource: get('researchSource'),
     activity: [], nextFollowUp: null, lostReason: null, createdDate: todayStr(), clientId: null
   };
-  p.activity.push({ date: todayStr(), type: 'note', text: `Imported from research${p.researchGrade ? ' (grade ' + p.researchGrade + ')' : ''}${p.researchWhy ? ' — ' + p.researchWhy : ''}` });
-  return p;
+  const keep = !flag.startsWith('N');   // Y, blank, anything else = import; N / No = throw back
+  if (keep) {
+    p.activity.push({ date: todayStr(), type: 'note', text: `Imported from research${p.researchGrade ? ' (grade ' + p.researchGrade + ')' : ''}${p.researchWhy ? ' — ' + p.researchWhy : ''}${p.researchSource ? ' — ' + p.researchSource : ''}` });
+  } else {
+    p.status = THROWN_BACK;
+    p.lostReason = 'Marked N on research import';
+    p.lostDate = todayStr();
+    p.activity.push({ date: todayStr(), type: 'note', text: `Marked N on research import by ${currentBDM} — excluded from future research` });
+  }
+  return { p, keep, flagged: !!flag };
 }
 
 async function importResearchFile(input) {
@@ -1134,88 +1154,60 @@ async function importResearchFile(input) {
     const sheetName = wb.SheetNames.includes(IMPORT_SHEET) ? IMPORT_SHEET : wb.SheetNames[0];
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
     if (!rows.length) { alert(`No rows found in "${sheetName}". Nothing was imported.`); return; }
+    const hasImportCol = Object.keys(rows[0]).some(h => normKey(h) === 'import');
 
     const existing = new Map(prospects.map(p => [leadKey(p.company, p.suburb), p]));
     const existingNames = new Map(prospects.map(p => [normKey(p.company), p]));
-    const fresh = [], skipped = [], noName = [];
+    const kept = [], thrown = [], skipped = [];
+    let noName = 0;
     rows.forEach(r => {
-      const p = rowToSuggested(r);
-      if (!p.company) { noName.push(r); return; }
+      const { p, keep } = rowToLead(r);
+      if (!p.company) { noName++; return; }
       const k = leadKey(p.company, p.suburb);
       const sameName = existingNames.get(normKey(p.company));
       const match = existing.get(k) || (sameName && (!p.suburb || !sameName.suburb) ? sameName : null);
-      if (match) { skipped.push(`${p.company} (${match.status === THROWN_BACK ? 'thrown back before' : 'already in Tracker'})`); return; }
+      if (match) { skipped.push(`${p.company} (${match.status === THROWN_BACK ? 'marked N before' : 'already in Tracker'})`); return; }
       existing.set(k, p);
       if (!existingNames.has(normKey(p.company))) existingNames.set(normKey(p.company), p);
-      fresh.push(p);
+      (keep ? kept : thrown).push(p);
     });
 
-    if (!fresh.length) {
+    if (!kept.length && !thrown.length) {
       alert(`Nothing new to import from "${sheetName}".` + (skipped.length ? `\n\nSkipped ${skipped.length}:\n${skipped.slice(0, 10).join('\n')}` : ''));
       return;
     }
-    const noState = fresh.filter(p => !p.state).length;
+    const noState = kept.filter(p => !p.state).length;
     const msg =
-      `Import ${fresh.length} lead${fresh.length !== 1 ? 's' : ''} from "${sheetName}" as Suggested, assigned to ${currentBDM}?\n\n` +
-      (skipped.length ? `Skipped ${skipped.length} (duplicate or thrown back before):\n${skipped.slice(0, 8).join('\n')}${skipped.length > 8 ? `\n...and ${skipped.length - 8} more` : ''}\n\n` : '') +
-      (noName.length ? `Ignored ${noName.length} row(s) with no company name.\n` : '') +
-      (noState ? `${noState} lead(s) have no valid state — set it when you Keep them.\n` : '') +
-      `\nThey stay out of your pipeline until you tick Keep.`;
+      `From "${sheetName}", assigned to ${currentBDM}:\n\n` +
+      `• Import as Cold leads (Y): ${kept.length}\n` +
+      `• Not imported, kept out of future research (N): ${thrown.length}\n` +
+      (skipped.length ? `• Skipped, already known: ${skipped.length}\n   ${skipped.slice(0, 6).join('\n   ')}${skipped.length > 6 ? `\n   ...and ${skipped.length - 6} more` : ''}\n` : '') +
+      (noName ? `• Ignored, no company name: ${noName}\n` : '') +
+      (noState ? `\n${noState} kept lead(s) have no valid state — set it on the card.\n` : '') +
+      (!hasImportCol ? `\nNo IMPORT column found — every row will be imported.\n` : '') +
+      `\nGo ahead?`;
     if (!confirm(msg)) { showToast('Import cancelled — nothing changed'); return; }
 
-    prospects = [...fresh, ...prospects];
+    const added = [...kept, ...thrown];
+    prospects = [...added, ...prospects];
     const saved = await saveTracker();
-    if (!saved) { prospects = prospects.filter(p => !fresh.includes(p)); render(); alert('Import could not be saved to Drive, so nothing was changed. Tap Load and try again.'); return; }
-    render();
-    showToast(`✅ ${fresh.length} suggested lead${fresh.length !== 1 ? 's' : ''} ready to review`);
+    if (!saved) { prospects = prospects.filter(p => !added.includes(p)); render(); alert('Import could not be saved to Drive, so nothing was changed. Tap Load and try again.'); return; }
+    if (kept.length) setViewMode('cold'); else render();
+    // Place the new leads on the map now, at the desk, so Near me works straight away in the field.
+    if (kept.length) geocodeMissing(kept).then(n => { if (n) saveTracker(); }).catch(() => {});
+    showToast(`✅ ${kept.length} lead${kept.length !== 1 ? 's' : ''} added to Cold`);
   } catch (e) {
     alert('Import stopped — ' + e.message + '\n\nNothing was changed.');
   }
 }
 
-function keepSuggested(id) {
-  const p = findProspect(id);
-  if (!p || p.status !== SUGGESTED) return;
-  p.status = 'New Lead';
-  p.activity.push({ date: todayStr(), type: 'note', text: `Kept from research by ${currentBDM}` });
-  saveTracker();
-  render();
-  showToast(`Kept — ${p.company} is now a New Lead`);
-}
-
-let _throwTargetId = null;
-function openThrowModal(id) {
-  _throwTargetId = id;
-  document.getElementById('throwReasonSelect').value = '';
-  document.getElementById('throwModal').classList.add('open');
-}
-function closeThrowModal() {
-  _throwTargetId = null;
-  document.getElementById('throwModal').classList.remove('open');
-}
-function confirmThrowBack() {
-  const reason = document.getElementById('throwReasonSelect').value;
-  if (!reason) { showToast('Select a reason first'); return; }
-  const p = findProspect(_throwTargetId);
-  if (p && p.status === SUGGESTED) {
-    p.status = THROWN_BACK;
-    p.lostReason = reason;
-    p.lostDate = todayStr();
-    p.activity.push({ date: todayStr(), type: 'note', text: `Thrown back by ${currentBDM} — ${reason}` });
-    saveTracker();
-    showToast(`Thrown back — ${p.company} won't be suggested again`);
-  }
-  closeThrowModal();
-  render();
-}
-
 function openExclusionList() {
   const lines = prospects
     .filter(p => p.company)
-    .map(p => `${p.company}${p.suburb ? ', ' + p.suburb : ''}${p.state ? ' ' + p.state : ''}${p.status === THROWN_BACK ? ' (thrown back)' : ''}`)
+    .map(p => `${p.company}${p.suburb ? ', ' + p.suburb : ''}${p.state ? ' ' + p.state : ''}${p.status === THROWN_BACK ? ' (marked N)' : ''}`)
     .sort((a, b) => a.localeCompare(b));
   document.getElementById('exclusionText').value = lines.length
-    ? 'Exclude these companies (already in the Prospect Tracker or thrown back):\n' + lines.join('\n')
+    ? 'Exclude these companies (already in the Prospect Tracker or previously marked N):\n' + lines.join('\n')
     : 'No companies in the Tracker yet.';
   document.getElementById('exclusionModal').classList.add('open');
 }
@@ -1226,28 +1218,146 @@ async function copyExclusionList() {
   catch (e) { ta.removeAttribute('readonly'); ta.select(); showToast('Select all and copy'); }
 }
 
-function safeUrl(u) { return /^https?:\/\//i.test(u || '') ? u : ''; }
+// Cold <-> Pipeline. Switching resets the stage filter (stages only apply to Pipeline).
+function setViewMode(mode) {
+  viewMode = mode === 'cold' ? 'cold' : 'pipeline';
+  stageFilter = 'ALL';
+  document.getElementById('viewTabPipeline').classList.toggle('active', viewMode === 'pipeline');
+  document.getElementById('viewTabCold').classList.toggle('active', viewMode === 'cold');
+  render();
+}
 
-function suggestedCardHtml(p) {
-  const where = [p.suburb, p.state].filter(Boolean).join(' ');
-  const who = p.contact2Name ? `${p.contact2Name}${p.contact2Role ? ', ' + p.contact2Role : ''}` : (p.contactName ? `${p.contactName}${p.contactRole ? ', ' + p.contactRole : ''}` : 'No contact yet');
-  const src = safeUrl(p.researchSource);
-  return `
-  <div class="p-card s-card" style="--accent:#c4b5fd;">
-    <div class="p-card-top" style="cursor:default;">
-      <div>
-        <div class="p-company">${escapeHtml(p.company)}${p.researchGrade ? `<span class="grade-badge">${escapeHtml(p.researchGrade)}</span>` : ''}</div>
-        <div class="p-meta">${escapeHtml(where || 'No location')} · ${escapeHtml(who)}</div>
-      </div>
-      <div class="p-status-badge">Suggested</div>
-    </div>
-    ${p.researchWhy ? `<div class="s-why">${escapeHtml(p.researchWhy)}</div>` : ''}
-    ${src ? `<a class="s-source" href="${escapeHtml(src)}" target="_blank" rel="noopener">Source</a>` : ''}
-    <div class="s-actions">
-      <button class="btn btn-keep" onclick="keepSuggested('${p.id}')">&#10003; Keep</button>
-      <button class="btn btn-throw" onclick="openThrowModal('${p.id}')">Throw back</button>
-    </div>
-  </div>`;
+// =====================================================================
+// NEAR ME — sorts the current view (Cold or Pipeline) by distance from
+// the phone's position. Each lead's address is turned into map
+// coordinates once (Google Geocoder, same Maps key as the other Field
+// Tools forms) and stored on the lead (lat/lng + the address it came
+// from); editing the address clears them so they're redone. The phone's
+// own position is only held in memory for this visit, never saved.
+// =====================================================================
+const MAPS_API_KEY = 'AIzaSyBb-EHe4hw-UmY9xFNRDMwbf-A27S2WbPQ';
+const ADDRESS_FIELDS = ['streetAddress', 'suburb', 'postcode', 'state'];
+let nearMode = false;
+let nearRadiusKm = 10;
+let myPos = null;            // { lat, lng, at } — memory only
+let nearDist = new Map();    // lead id -> km, for the current render only
+let _mapsPromise = null;
+
+function geoAddress(p) {
+  if (!p.streetAddress && !p.suburb) return '';
+  return [p.streetAddress, p.suburb, p.state, p.postcode, 'Australia'].filter(Boolean).join(', ');
+}
+function hasCoords(p) { return typeof p.lat === 'number' && typeof p.lng === 'number' && p.geoAddr === geoAddress(p); }
+
+function loadMaps() {
+  if (window.google && window.google.maps && window.google.maps.Geocoder) return Promise.resolve();
+  if (_mapsPromise) return _mapsPromise;
+  _mapsPromise = new Promise((resolve, reject) => {
+    window.__bbMapsReady = () => resolve();
+    const sc = document.createElement('script');
+    sc.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_API_KEY}&callback=__bbMapsReady`;
+    sc.async = true;
+    sc.onerror = () => { _mapsPromise = null; reject(new Error('Google Maps did not load — check your signal')); };
+    document.head.appendChild(sc);
+  });
+  return _mapsPromise;
+}
+
+function geocodeOne(geocoder, address) {
+  return new Promise(resolve => {
+    geocoder.geocode({ address, componentRestrictions: { country: 'AU' } }, (results, status) => resolve({ results, status }));
+  });
+}
+
+// Places every lead in `list` that has an address but no current
+// coordinates. One at a time, gently paced. Returns how many changed.
+async function geocodeMissing(list, onProgress) {
+  const todo = list.filter(p => geoAddress(p) && !hasCoords(p) && p.geoFailed !== geoAddress(p));
+  if (!todo.length) return 0;
+  await loadMaps();
+  const geocoder = new google.maps.Geocoder();
+  let changed = 0;
+  for (let i = 0; i < todo.length; i++) {
+    const p = todo[i], address = geoAddress(p);
+    if (onProgress) onProgress(i + 1, todo.length);
+    let r = await geocodeOne(geocoder, address);
+    if (r.status === 'OVER_QUERY_LIMIT') { await new Promise(res => setTimeout(res, 1200)); r = await geocodeOne(geocoder, address); }
+    if (r.status === 'OK' && r.results && r.results[0]) {
+      const loc = r.results[0].geometry.location;
+      p.lat = loc.lat(); p.lng = loc.lng(); p.geoAddr = address; delete p.geoFailed;
+      changed++;
+    } else if (r.status === 'ZERO_RESULTS') {
+      p.geoFailed = address; changed++;   // remembered so it isn't retried until the address changes
+    } else if (r.status === 'REQUEST_DENIED') {
+      throw new Error('Google refused the address lookup (Maps key settings)');
+    }
+    await new Promise(res => setTimeout(res, 120));
+  }
+  return changed;
+}
+
+function distanceKm(aLat, aLng, bLat, bLng) {
+  const R = 6371, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function getMyPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('This browser cannot share your location')); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, at: new Date() }),
+      err => reject(new Error(err.code === 1
+        ? 'Location is blocked — allow location for this site in your phone/browser settings'
+        : 'Could not get your location — try again in a moment')),
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
+    );
+  });
+}
+
+async function toggleNearMe() {
+  if (nearMode) { nearMode = false; myPos = null; updateNearBar(); render(); return; }
+  await refreshNearMe();
+}
+
+async function refreshNearMe() {
+  const info = document.getElementById('nearInfo');
+  try {
+    info.textContent = 'Finding your location...';
+    myPos = await getMyPosition();
+    nearMode = true;
+    const pool = prospects.filter(p => p.status === 'New Lead' || PIPELINE_STATUSES.includes(p.status));
+    const changed = await geocodeMissing(pool, (i, n) => { info.textContent = `Placing addresses on the map... ${i} of ${n}`; });
+    if (changed) saveTracker();
+    updateNearBar();
+    render();
+  } catch (e) {
+    nearMode = !!myPos && nearMode;
+    info.textContent = '⚠️ ' + e.message;
+    updateNearBar(true);
+    render();
+  }
+}
+
+function setNearRadius(v) {
+  nearRadiusKm = v === 'all' ? Infinity : Number(v);
+  render();
+}
+
+function updateNearBar(keepInfo) {
+  const btn = document.getElementById('nearBtn');
+  btn.classList.toggle('active', nearMode);
+  btn.innerHTML = nearMode ? '&#10005; Clear near me' : '&#128205; Near me';
+  if (keepInfo) return;
+  const info = document.getElementById('nearInfo');
+  info.innerHTML = nearMode && myPos
+    ? `Sorted by distance from where you were at ${myPos.at.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })}<span onclick="refreshNearMe()">Refresh</span>`
+    : '';
+}
+
+function directionsUrl(p) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.lat + ',' + p.lng)}`;
 }
 
 // =====================================================================
@@ -1282,7 +1392,7 @@ function addNewLead() {
   ['nlCompany','nlContactName','nlContactPhone','nlContactEmail'].forEach(id => document.getElementById(id).value = '');
   saveTracker();
   render();
-  showToast('Lead added — ' + company);
+  showToast('Added to Cold \u2014 log a call, email or visit to move it into Pipeline');
 }
 
 // =====================================================================
@@ -1337,6 +1447,7 @@ function logActivity(id, type, text) {
   if (!p) return;
   p.activity.push({ date: todayStr(), type, text });
   // Bump New Lead -> Contacted automatically on first real activity.
+  const wasCold = p.status === 'New Lead';
   if (type === 'visit' && (p.status === 'New Lead' || p.status === 'Contacted')) p.status = 'Engaged';
   else if (p.status === 'New Lead' && (type === 'email' || type === 'call')) p.status = 'Contacted';
   // Suggest next follow-up 7 days out unless one is already set in the future.
@@ -1344,6 +1455,7 @@ function logActivity(id, type, text) {
   if (!p.nextFollowUp || p.nextFollowUp < todayStr()) p.nextFollowUp = suggested;
   saveTracker();
   render();
+  if (wasCold && p.status !== 'New Lead') showToast(`${p.company} moved from Cold into Pipeline (${p.status})`);
   // Logged locally above (never lost even if this fails) — now sync to the
   // shared spreadsheet in the background so it's exportable.
   syncActivityToNotesLog(p, text);
@@ -1489,6 +1601,7 @@ function updateField(id, field, value) {
   const p = findProspect(id);
   if (!p) return;
   p[field] = (value || '').trim();
+  if (ADDRESS_FIELDS.includes(field)) { delete p.lat; delete p.lng; delete p.geoAddr; delete p.geoFailed; }
   saveTracker();
   if (p.clientId && p.status !== 'Won' && CLIENT_RECORD_SYNCED_FIELDS.has(field)) queueClientRecordSync(p);
   const detail = document.getElementById('detail-' + id);
@@ -1597,7 +1710,8 @@ function setStageFilter(s) {
 function renderStageStrip(counts) {
   const strip = document.getElementById('stageStrip');
   if (!strip) return;
-  const stages = STATUS_ORDER.filter(s => s !== 'Lost');
+  if (viewMode === 'cold') { strip.innerHTML = ''; return; }
+  const stages = PIPELINE_STATUSES;
   strip.innerHTML = stages.map(s =>
     `<button class="filter-pill${stageFilter===s?' active':''}" onclick="setStageFilter('${s}')">${s} (${counts[s]||0})</button>`
   ).join('');
@@ -1668,7 +1782,10 @@ function cardHtml(p) {
   const accent = STATUS_COLORS[p.status] || '#64d2ff';
   const bucket = bucketFor(p);
   const followUpClass = bucket === 'overdue' ? 'overdue' : bucket === 'today' ? 'today' : bucket === 'nodate' ? 'nodate' : 'upcoming';
-  const followUpLabel = p.nextFollowUp
+  const ageDays = p.createdDate ? daysBetween(p.createdDate, todayStr()) : null;
+  const followUpLabel = p.status === 'New Lead'
+    ? `Not contacted yet${ageDays === null ? '' : ageDays === 0 ? ' \u2014 added today' : ` \u2014 added ${ageDays} day${ageDays !== 1 ? 's' : ''} ago`}`
+    : p.nextFollowUp
     ? (bucket === 'overdue' ? `Overdue by ${daysBetween(p.nextFollowUp, todayStr())} day${daysBetween(p.nextFollowUp, todayStr())!==1?'s':''}` : bucket === 'today' ? 'Due today' : 'Due ' + fmtDate(p.nextFollowUp))
     : (p.createdDate ? `No follow-up set \u2014 added ${daysBetween(p.createdDate, todayStr())} day${daysBetween(p.createdDate, todayStr())!==1?'s':''} ago` : 'No follow-up set');
   const activityHtml = (p.activity || []).slice().reverse().map(a => `
@@ -1683,6 +1800,7 @@ function cardHtml(p) {
       <div>
         <div class="p-company">${escapeHtml(p.company)}</div>
         <div class="p-meta">${p.state}${p.bdm ? ' · ' + escapeHtml(p.bdm) : ''}${p.contactName ? ' · ' + escapeHtml(p.contactName) : ''}</div>
+        ${nearDist.has(p.id) ? `<div class="near-line">${nearDist.get(p.id) < 10 ? nearDist.get(p.id).toFixed(1) : Math.round(nearDist.get(p.id))} km away${p.suburb ? ' \u00b7 ' + escapeHtml(p.suburb) : ''}<a href="${directionsUrl(p)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Directions</a></div>` : ''}
         <div class="p-followup ${followUpClass}">${followUpLabel}</div>
       </div>
       <div class="p-status-badge">${p.status}</div>
@@ -1885,10 +2003,10 @@ function render() {
     }
     return true;
   });
-  const active = visible.filter(p => p.status !== 'Lost' && p.status !== SUGGESTED && p.status !== THROWN_BACK);
+  const active = visible.filter(p => PIPELINE_STATUSES.includes(p.status));
   const lost   = visible.filter(p => p.status === 'Lost');
-  const suggested = visible.filter(p => p.status === SUGGESTED)
-    .sort((a, b) => (a.researchGrade || 'Z').localeCompare(b.researchGrade || 'Z'));
+  const cold   = visible.filter(p => p.status === 'New Lead')
+    .sort((a, b) => (a.createdDate || '').localeCompare(b.createdDate || ''));
 
   // Stage strip counts reflect State/BDM/search but deliberately NOT the
   // stage filter itself — otherwise selecting one stage would zero out the
@@ -1901,11 +2019,18 @@ function render() {
       const haystack = (p.company + ' ' + (p.contactName || '')).toLowerCase();
       if (!haystack.includes(searchFilter)) return false;
     }
-    return p.status !== 'Lost' && p.status !== SUGGESTED && p.status !== THROWN_BACK;
+    return true;
   });
   const stageCounts = {};
-  STATUS_ORDER.filter(s => s !== 'Lost').forEach(s => { stageCounts[s] = forCounts.filter(p => p.status === s).length; });
+  PIPELINE_STATUSES.forEach(s => { stageCounts[s] = forCounts.filter(p => p.status === s).length; });
   renderStageStrip(stageCounts);
+
+  // Tab labels: counts follow State/BDM/search; Cold also shows its oldest lead's age.
+  const coldAll = forCounts.filter(p => p.status === 'New Lead');
+  const pipeCount = forCounts.filter(p => PIPELINE_STATUSES.includes(p.status) && p.status !== 'Won').length;
+  const oldest = coldAll.reduce((m, p) => p.createdDate ? Math.max(m, daysBetween(p.createdDate, todayStr())) : m, 0);
+  document.getElementById('pipelineTabInfo').textContent = `${pipeCount} in motion`;
+  document.getElementById('coldTabInfo').textContent = coldAll.length ? `${coldAll.length} · oldest ${oldest} day${oldest !== 1 ? 's' : ''}` : 'none';
 
   // With a stage selected, sort every bucket newest-added-first instead of
   // by follow-up urgency — you're already looking at one stage, so "what's
@@ -1928,17 +2053,32 @@ function render() {
   };
 
   const dash = document.getElementById('dashboard');
-  const suggestedHtml = suggested.length
-    ? `<div class="section-label suggested">Suggested — review <span class="section-count">${suggested.length}</span></div>` + suggested.map(suggestedCardHtml).join('')
-    : '';
-  const html = suggestedHtml + section('Overdue','overdue',overdue) + section('Due today','today',today) +
-               section('Upcoming','upcoming',upcoming) + section('No follow-up set','nodate',nodate);
+  nearDist = new Map();
+  let nearHtml = null;
+  if (nearMode && myPos) {
+    const pool = viewMode === 'cold' ? cold : active;
+    const placed = pool.filter(hasCoords);
+    placed.forEach(p => nearDist.set(p.id, distanceKm(myPos.lat, myPos.lng, p.lat, p.lng)));
+    const near = placed.filter(p => nearDist.get(p.id) <= nearRadiusKm).sort((a, b) => nearDist.get(a.id) - nearDist.get(b.id));
+    const unplaced = pool.length - placed.length;
+    const label = `Near you \u2014 ${viewMode === 'cold' ? 'Cold' : 'Pipeline'}, ${nearRadiusKm === Infinity ? 'any distance' : 'within ' + nearRadiusKm + ' km'}`;
+    nearHtml = (near.length ? section(label, 'near', near) : `<div class="section-label near">${label} <span class="section-count">0</span></div><div class="empty-note">Nothing in range \u2014 try a wider distance or the other tab.</div>`) +
+      (unplaced ? `<div class="empty-note">${unplaced} lead${unplaced !== 1 ? 's' : ''} in this view can't be placed \u2014 add a street address or suburb.</div>` : '');
+  }
+  const html = nearHtml !== null ? nearHtml : viewMode === 'cold'
+    ? section('Cold \u2014 not yet contacted, oldest first','cold',cold)
+    : section('Overdue','overdue',overdue) + section('Due today','today',today) +
+      section('Upcoming','upcoming',upcoming) + section('No follow-up set','nodate',nodate);
   const filterActive = stateFilter !== 'ALL' || bdmFilter !== 'ALL' || stageFilter !== 'ALL' || !!searchFilter;
   const emptyMsg = filterActive
     ? `No prospects match ${searchFilter ? `"${searchFilter}"` : 'that filter'} — try clearing the search or switching filters.`
-    : 'No active prospects yet — add one above, or tap Load if you already have some in Drive.';
+    : (viewMode === 'cold'
+        ? 'No cold leads \u2014 add one above, or import research.'
+        : 'Nothing in the pipeline yet \u2014 log a call, email or visit on a Cold lead to move it here.');
   dash.innerHTML = html || `<div class="empty-note">${emptyMsg}</div>`;
 
+  document.getElementById('lostToggle').style.display = viewMode === 'cold' ? 'none' : '';
+  if (viewMode === 'cold') document.getElementById('lostWrap').classList.remove('open');
   document.getElementById('lostCount').textContent = lost.length;
   document.getElementById('lostWrap').innerHTML = lost.length
     ? lost.map(cardHtml).join('')
