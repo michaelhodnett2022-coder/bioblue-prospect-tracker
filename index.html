@@ -237,11 +237,6 @@ body {
   </select>
 </div>
 
-<div style="text-align:center;margin-bottom:16px;">
-  <span onclick="openImportPicker()" style="font-size:11px;color:rgba(255,255,255,0.45);text-decoration:underline;cursor:pointer;">Import existing Prospect/Client records</span>
-  <span onclick="resyncAllToClientRecords()" style="font-size:11px;color:rgba(255,255,255,0.45);text-decoration:underline;cursor:pointer;margin-left:14px;">Resync all to Client Records</span>
-</div>
-
 <div class="new-lead-card">
   <div class="new-lead-title" id="newLeadToggle" onclick="toggleNewLead()">
     <span>+ Add new lead</span><span id="newLeadChevron">&#9662;</span>
@@ -299,23 +294,6 @@ body {
     <div class="modal-btn-row">
       <button class="btn btn-ghost" onclick="closeLostModal()">Cancel</button>
       <button class="btn btn-primary" onclick="confirmMarkLost()">Confirm</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="importModal">
-  <div class="modal-box" style="max-width:440px;max-height:82vh;display:flex;flex-direction:column;">
-    <h3>Import from production</h3>
-    <input type="text" id="importSearchInput" placeholder="Search by company name..." oninput="setImportSearch(this.value)"
-      style="width:100%;padding:9px 10px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:white;font-size:12.5px;margin-bottom:10px;font-family:'DM Sans',sans-serif;">
-    <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:6px;display:flex;justify-content:space-between;">
-      <span id="importCandidateCount">Loading...</span>
-      <span onclick="toggleSelectAllImport()" style="text-decoration:underline;cursor:pointer;">Select all shown</span>
-    </div>
-    <div id="importList" style="overflow-y:auto;flex:1;min-height:120px;max-height:340px;border-top:1px solid rgba(255,255,255,0.1);"></div>
-    <div class="modal-btn-row" style="margin-top:12px;">
-      <button class="btn btn-ghost" onclick="closeImportPicker()">Cancel</button>
-      <button class="btn btn-primary" onclick="confirmImportSelected()" id="importConfirmBtn">Import selected (0)</button>
     </div>
   </div>
 </div>
@@ -651,6 +629,8 @@ async function mintClientId(p) {
 // row — doc numbers, Drive Folder ID, Trackpod/Generated Site Name,
 // POD emails, Record Status, etc. — is read back and rewritten
 // untouched, so Quote Builder/Audit/Admin edits are never clobbered.
+// Stops at Won: from then on the Prospect/Client form owns the client
+// record, so Tracker edits no longer push into Client Records.
 // =====================================================================
 const CLIENT_RECORD_SYNCED_FIELDS = new Set([
   'company', 'descriptor', 'streetAddress', 'suburb', 'state', 'postcode',
@@ -662,8 +642,7 @@ const CLIENT_RECORD_SYNCED_FIELDS = new Set([
 
 // Writes the Tracker-owned fields from `p` into `row` (an existing
 // Client Records row array), using the same header lookups as
-// mintClientId so the two never drift apart. Shared by the live sync
-// below and the manual "Resync all" backfill.
+// mintClientId so the two never drift apart. Used by the live sync below.
 function applyProspectToClientRow(p, row, headers) {
   while (row.length < headers.length) row.push('');
   const set = (col, val) => { const i = headers.indexOf(col); if (i > -1) row[i] = val; };
@@ -749,7 +728,7 @@ async function queueClientRecordSync(p) {
     while (clientSyncQueueIds.size) {
       const ids = Array.from(clientSyncQueueIds);
       clientSyncQueueIds.clear();
-      const batch = ids.map(findProspect).filter(x => x && x.clientId);
+      const batch = ids.map(findProspect).filter(x => x && x.clientId && x.status !== 'Won');
       if (batch.length) await pushProspectsToClientRecords(batch);
     }
   } catch (e) {
@@ -759,91 +738,6 @@ async function queueClientRecordSync(p) {
   }
 }
 
-// Manual escape hatch: re-pushes every lead that already has a Client ID,
-// regardless of whether anything changed. Used once as a backfill for
-// leads that went stale before live sync existed, and available any
-// time afterward if a sync is ever suspected to have failed silently.
-async function resyncAllToClientRecords() {
-  const withClientId = prospects.filter(p => p.clientId);
-  if (!withClientId.length) { showToast('No leads have a Client ID yet \u2014 nothing to sync'); return; }
-  showToast(`Syncing ${withClientId.length} lead(s) to Client Records...`);
-  try {
-    await pushProspectsToClientRecords(withClientId);
-    showToast(`\u2705 Synced ${withClientId.length} lead(s) to Client Records`);
-  } catch (e) {
-    showToast('\u26A0\uFE0F Resync failed \u2014 ' + e.message);
-  }
-}
-
-function bdmNameFromEmail(email) {
-  const found = Object.entries(BDM_EMAILS).find(([, e]) => e === (email || '').trim());
-  return found ? found[0] : 'Michael Hodnett';
-}
-
-// Best-effort status inference from the old checkbox flags. Every row in
-// Client Records already has 'Prospect ✓' set (it's written the moment
-// the form is submitted), so that alone can't distinguish stages — the
-// real signal is which of Quote Sent / Customer are also set. This is
-// necessarily approximate: the old data model never tracked Contacted vs
-// Engaged as separate stages, so anything imported lands at Engaged or
-// later. Every field on an imported card is editable afterward the same
-// as any other, so a wrong guess here is a one-tap fix, not a re-import.
-function inferStatusFromRecord(get) {
-  if ((get('Customer \u2713') || '').trim()) return 'Won';
-  if ((get('Quote Sent \u2713') || '').trim()) return 'Quoted';
-  return 'Engaged';
-}
-
-// One-time (but safely re-runnable) backfill for prospects that already
-// have a full Prospect/Client record from before the Tracker existed.
-// Matches on Client ID to skip anything already present, so running this
-// more than once never creates duplicates.
-// Points at the REAL production Drive folder. In this live file it matches
-// GDRIVE_FOLDER_NAME; kept as its own constant because the read-only import
-// path below must never create anything.
-const PRODUCTION_FOLDER_NAME = 'BioBlue Audits';
-
-// Read-only, and deliberately the opposite of getOrCreateFolder's
-// find-or-create behaviour: if BioBlue Audits, ADMIN DATA, or the Client
-// Records file itself isn't found exactly where expected, this throws and
-// stops — it must never create anything in production, under any
-// circumstance. Nothing in this function writes anywhere.
-async function getProductionClientRecordsRows() {
-  const rf = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=name='${PRODUCTION_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id)`,
-    { headers: { Authorization: `Bearer ${gdriveToken}` } }
-  );
-  const rd = await rf.json();
-  if (!rd.files || !rd.files.length) throw new Error(`Production folder "${PRODUCTION_FOLDER_NAME}" not found`);
-  const rootId = rd.files[0].id;
-
-  const af = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=name='ADMIN DATA - DO NOT REMOVE' and '${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id)`,
-    { headers: { Authorization: `Bearer ${gdriveToken}` } }
-  );
-  const ad = await af.json();
-  if (!ad.files || !ad.files.length) throw new Error('Production ADMIN DATA folder not found');
-  const adminId = ad.files[0].id;
-
-  const sf = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=name='${CLIENT_RECORDS_NAME}' and '${adminId}' in parents and trashed=false&fields=files(id)`,
-    { headers: { Authorization: `Bearer ${gdriveToken}` } }
-  );
-  const sd = await sf.json();
-  if (!sd.files || !sd.files.length) throw new Error('Production Client Records file not found');
-
-  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${sd.files[0].id}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
-  if (!dl.ok) throw new Error('Download failed (' + dl.status + ')');
-  const ab = await dl.arrayBuffer();
-  const wb = XLSX.read(new Uint8Array(ab), { type: 'array' });
-  const ws = wb.Sheets['Client Records'];
-  if (!ws) throw new Error('Client Records sheet not found in production file');
-  return XLSX.utils.sheet_to_json(ws, { header: 1 });
-}
-
-// Shared by the picker below — turns one Client Records row into a
-// Tracker prospect object. Kept as one function so there's only one place
-// that needs updating if the mapping ever changes.
 // =====================================================================
 // =====================================================================
 // TAP-TO-CALL — iOS never auto-links a phone number sitting inside a
@@ -912,134 +806,6 @@ function saveContactVCard(id, slot) {
   if (slot === 1) generateVCardFile(p.contactName, p.contactRole, p.contactPhone, p.contactEmail, p.company, address, note);
   else if (slot === 2) generateVCardFile(p.contact2Name, p.contact2Role, p.contact2Phone, p.contact2Email, p.company, address, note);
   else if (slot === 3) generateVCardFile(p.contact3Name, p.contact3Label, p.contact3Phone, p.contact3Email, p.company, address, note);
-}
-
-function mapRowToProspect(get, clientId) {
-  return {
-    id: uid(),
-    clientId: clientId,
-    company: get('Billing Entity'),
-    state: get('State') || '',
-    bdm: bdmNameFromEmail(get('BDM Email')),
-    descriptor: get('Descriptor'),
-    streetAddress: get('Street Address'),
-    suburb: get('Suburb'),
-    postcode: get('Postcode'),
-    productInterest: get('Product Interest'),
-    currentSupplier: get('Current Supplier'),
-    estimatedVolumeLitres: '',
-    estimatedVolumePeriod: 'month',
-    contactName: get('Business Contact Name'),
-    contactRole: get('Business Contact Role'),
-    contactPhone: get('Business Contact Phone'),
-    contactEmail: get('Business Contact Email'),
-    contact2Name: get('KDM Name'),
-    contact2Role: get('KDM Role'),
-    contact2Phone: get('KDM Phone'),
-    contact2Email: get('KDM Email'),
-    contact3Label: get('Other Contact Label'),
-    contact3Name: get('Other Contact Name'),
-    contact3Phone: get('Other Contact Phone'),
-    contact3Email: get('Other Contact Email'),
-    status: inferStatusFromRecord(get),
-    activity: [{ date: todayStr(), type: 'note', text: 'Imported from existing Prospect/Client record' }],
-    nextFollowUp: null,
-    lostReason: null,
-    createdDate: (get('Created Date') || todayStr()).toString().slice(0, 10),
-  };
-}
-
-// =====================================================================
-// IMPORT PICKER — search production Client Records and choose exactly
-// which ones to bring in, one or many, rather than an all-or-nothing pull.
-// =====================================================================
-let _importCandidates = [];   // [{ clientId, company, state, get }] — not yet in the Tracker
-let _importSelected = new Set();
-let _importSearch = '';
-
-async function openImportPicker() {
-  document.getElementById('importModal').classList.add('open');
-  document.getElementById('importCandidateCount').textContent = 'Loading...';
-  document.getElementById('importList').innerHTML = '';
-  document.getElementById('importSearchInput').value = '';
-  _importSearch = '';
-  _importSelected = new Set();
-
-  try {
-    const connected = await ensureConnected();
-    if (!connected) throw new Error('Could not connect to Drive');
-
-    const rows = await getProductionClientRecordsRows();
-    const headers = rows[0] || [];
-    const idx = {};
-    headers.forEach((h, i) => { idx[h] = i; });
-    const existingIds = new Set(prospects.map(p => p.clientId).filter(Boolean));
-
-    _importCandidates = rows.slice(1)
-      .map(row => {
-        const get = (col) => (idx[col] !== undefined ? row[idx[col]] : '') || '';
-        return { clientId: get('Client ID'), company: get('Billing Entity'), state: get('State') || '', get };
-      })
-      .filter(c => c.clientId && !existingIds.has(c.clientId) && c.company);
-
-    renderImportPicker();
-  } catch (e) {
-    document.getElementById('importCandidateCount').textContent = 'Error';
-    document.getElementById('importList').innerHTML = `<div class="empty-note">${escapeHtml(e.message)}</div>`;
-  }
-}
-
-function setImportSearch(v) {
-  _importSearch = (v || '').trim().toLowerCase();
-  renderImportPicker();
-}
-
-function toggleImportSelection(clientId) {
-  if (_importSelected.has(clientId)) _importSelected.delete(clientId);
-  else _importSelected.add(clientId);
-  renderImportPicker();
-}
-
-function toggleSelectAllImport() {
-  const shown = _importCandidates.filter(c => !_importSearch || c.company.toLowerCase().includes(_importSearch));
-  const allSelected = shown.length > 0 && shown.every(c => _importSelected.has(c.clientId));
-  shown.forEach(c => { if (allSelected) _importSelected.delete(c.clientId); else _importSelected.add(c.clientId); });
-  renderImportPicker();
-}
-
-function renderImportPicker() {
-  const shown = _importCandidates.filter(c => !_importSearch || c.company.toLowerCase().includes(_importSearch));
-  document.getElementById('importCandidateCount').textContent = `${shown.length} available`;
-  document.getElementById('importList').innerHTML = shown.length
-    ? shown.map(c => `
-      <div onclick="toggleImportSelection('${c.clientId}')" style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid rgba(255,255,255,0.06);cursor:pointer;">
-        <input type="checkbox" ${_importSelected.has(c.clientId)?'checked':''} style="pointer-events:none;flex-shrink:0;">
-        <div>
-          <div style="font-size:13px;font-weight:600;">${escapeHtml(c.company)}</div>
-          <div style="font-size:10px;opacity:0.5;">${escapeHtml(c.state)} \u00b7 ${escapeHtml(c.clientId)}</div>
-        </div>
-      </div>`).join('')
-    : `<div class="empty-note">${_importSearch ? 'No matches' : 'Nothing left to import \u2014 already up to date'}</div>`;
-  document.getElementById('importConfirmBtn').textContent = `Import selected (${_importSelected.size})`;
-}
-
-function closeImportPicker() {
-  document.getElementById('importModal').classList.remove('open');
-}
-
-function confirmImportSelected() {
-  if (_importSelected.size === 0) { showToast('Select at least one to import'); return; }
-  let count = 0;
-  _importCandidates.forEach(c => {
-    if (_importSelected.has(c.clientId)) {
-      prospects.push(mapRowToProspect(c.get, c.clientId));
-      count++;
-    }
-  });
-  saveTracker();
-  render();
-  closeImportPicker();
-  showToast(`\u2705 Imported ${count} prospect${count!==1?'s':''}`);
 }
 
 // Drive keeps a folder's ID stable across a parent change — this is a
@@ -1483,7 +1249,7 @@ function updateField(id, field, value) {
   if (!p) return;
   p[field] = (value || '').trim();
   saveTracker();
-  if (p.clientId && CLIENT_RECORD_SYNCED_FIELDS.has(field)) queueClientRecordSync(p);
+  if (p.clientId && p.status !== 'Won' && CLIENT_RECORD_SYNCED_FIELDS.has(field)) queueClientRecordSync(p);
   const detail = document.getElementById('detail-' + id);
   const card = detail ? detail.closest('.p-card') : null;
   if (card) {
@@ -1858,6 +1624,7 @@ function cardHtml(p) {
         <button class="btn btn-ghost" onclick="addNote('${p.id}', this.previousElementSibling)">Add</button>
       </div>
       ${p.lostReason ? `<div class="lost-reason-tag">Lost — ${escapeHtml(p.lostReason)}</div>` : ''}
+      ${p.status === 'Won' && p.clientId ? `<div style="font-size:11px;color:#4ADE80;margin-top:8px;">Won \u2014 client details are now kept in the Prospect/Client form. Edits here no longer update Client Records.</div>` : ''}
     </div>
   </div>`;
 }
