@@ -347,7 +347,6 @@ const STATUS_COLORS = {
 // exactly what those forms expect, no remapping needed anywhere downstream.
 const BDM_EMAILS = {
   'Michael Hodnett': 'michael.hodnett@bioblue.com.au',
-  'Derek Page':       'derek.page@bioblue.com.au',
   'Angelo Sayas':     'angelo.sayas@bioblue.com.au',
   'Kevin Goverd':      'kevin.goverd@bioblue.com.au',
   'Brad Ryan':         'brad@bioblue.com.au',
@@ -369,6 +368,7 @@ let searchFilter = '';
 // leads to this person, persisted per-browser so it doesn't need resetting
 // every visit. Separate from bdmFilter, which is just what's shown.
 let currentBDM = sessionStorage.getItem('bb_tracker_bdm') || 'Michael Hodnett';
+if (!BDM_LIST.includes(currentBDM)) currentBDM = 'Michael Hodnett';
 let saveInFlight = false;
 let saveQueued = false;
 
@@ -1716,6 +1716,7 @@ function cardHtml(p) {
         <div>
           <label>BDM</label>
           <select onchange="updateField('${p.id}','bdm',this.value)">
+            ${p.bdm && !BDM_LIST.includes(p.bdm) ? `<option value="${escapeHtml(p.bdm)}" selected>${escapeHtml(p.bdm)} (former, reassign)</option>` : ''}
             ${BDM_LIST.map(n => `<option value="${n}" ${p.bdm===n?'selected':''}>${n}</option>`).join('')}
           </select>
         </div>
