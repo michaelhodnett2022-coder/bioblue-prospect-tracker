@@ -93,6 +93,7 @@ body {
   cursor:pointer;background:transparent;
 }
 .filter-pill.active { background:#64d2ff;border-color:#64d2ff;color:#001f3f; }
+.filter-bar select option { background:#003466;color:white; }
 
 /* SECTION LABEL */
 .section-label {
@@ -367,8 +368,10 @@ let searchFilter = '';
 // "Acting as" — whichever BDM is using the app right now. Defaults new
 // leads to this person, persisted per-browser so it doesn't need resetting
 // every visit. Separate from bdmFilter, which is just what's shown.
-let currentBDM = sessionStorage.getItem('bb_tracker_bdm') || 'Michael Hodnett';
+let currentBDM = (() => { try { return localStorage.getItem('bb_tracker_bdm') || sessionStorage.getItem('bb_tracker_bdm'); } catch (e) { return null; } })() || 'Michael Hodnett';
 if (!BDM_LIST.includes(currentBDM)) currentBDM = 'Michael Hodnett';
+// Open on the user's own leads; "All BDMs" is one tap away in the filter.
+bdmFilter = currentBDM;
 let saveInFlight = false;
 let saveQueued = false;
 
@@ -1598,7 +1601,11 @@ function renderStageStrip(counts) {
 // prospects' bdm field, only the default for anything added from here on.
 function setCurrentBDM(name) {
   currentBDM = name;
-  sessionStorage.setItem('bb_tracker_bdm', name);
+  try { localStorage.setItem('bb_tracker_bdm', name); } catch (e) {}
+  bdmFilter = name;
+  const filterSelect = document.getElementById('bdmFilterSelect');
+  if (filterSelect) filterSelect.value = name;
+  render();
 }
 
 function populateBdmDropdowns() {
@@ -1608,7 +1615,7 @@ function populateBdmDropdowns() {
     actingAs.innerHTML = BDM_LIST.map(n => `<option value="${n}" ${n===currentBDM?'selected':''}>${n}</option>`).join('');
   }
   if (filterSelect) {
-    filterSelect.innerHTML = '<option value="ALL">All BDMs</option>' + BDM_LIST.map(n => `<option value="${n}">${n}</option>`).join('');
+    filterSelect.innerHTML = '<option value="ALL">All BDMs</option>' + BDM_LIST.map(n => `<option value="${n}" ${n===bdmFilter?'selected':''}>${n}</option>`).join('');
   }
 }
 
