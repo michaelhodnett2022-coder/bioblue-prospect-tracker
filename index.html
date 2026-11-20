@@ -208,6 +208,8 @@ body {
   background:#0a2a4a;border:1px solid rgba(255,255,255,0.25);padding:10px 16px;border-radius:10px;font-size:12.5px;z-index:310;max-width:92%;
 }
 .undo-bar.show { display:flex; }
+#researchModal input { width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:white;font-family:'DM Sans',sans-serif;font-size:13px; }
+#researchModal input::placeholder { color:rgba(255,255,255,0.4); }
 .undo-bar button { background:#64d2ff;color:#001f3f;border:none;border-radius:8px;padding:6px 12px;font-weight:800;font-size:12px;cursor:pointer; }
 .remove-row { margin-top:14px;text-align:right; }
 .remove-link { font-size:11.5px;color:#f87171;text-decoration:underline;cursor:pointer;background:none;border:none;font-family:inherit; }
@@ -269,6 +271,7 @@ body {
 </div>
 
 <div class="tool-links">
+  <span onclick="openResearchModal()" style="color:#4ADE80;font-weight:700;">&#128269; Research an area</span>
   <span onclick="importFromDrive()" style="color:#64d2ff;font-weight:700;">&#9729;&#65039; Import from Drive</span>
   <span onclick="openPasteResearch()">&#128203; Paste research</span>
   <span onclick="document.getElementById('researchFileInput').click()">&#8679; Import research file</span>
@@ -355,6 +358,21 @@ body {
     <div class="modal-btn-row" style="margin-top:12px;">
       <button class="btn btn-ghost" onclick="closeExclusionList()">Close</button>
       <button class="btn btn-primary" onclick="copyExclusionList()">Copy</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="researchModal">
+  <div class="modal-box" style="max-width:440px;">
+    <h3>Research an area</h3>
+    <div style="font-size:11.5px;opacity:0.7;margin-bottom:10px;">Opens Claude with the full research request written for you, including every company already in the Tracker so they're left out. Tap send in Claude, then come back and use Import from Drive.</div>
+    <input type="text" id="researchArea" placeholder="Area, e.g. Hazelmere WA or Kalgoorlie to Leonora" style="width:100%;margin-bottom:8px;">
+    <input type="text" id="researchFocus" placeholder="Focus (optional), e.g. bus operators and quarries" style="width:100%;">
+    <div id="researchInfo" style="font-size:11px;opacity:0.6;margin-top:8px;"></div>
+    <div class="modal-btn-row" style="margin-top:12px;">
+      <button class="btn btn-ghost" onclick="closeResearchModal()">Cancel</button>
+      <button class="btn btn-ghost" onclick="copyResearchRequest()">Copy only</button>
+      <button class="btn btn-primary" onclick="openResearchInClaude()">Open Claude</button>
     </div>
   </div>
 </div>
@@ -1561,6 +1579,101 @@ function updateNearBar(keepInfo) {
 
 function directionsUrl(p) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.lat + ',' + p.lng)}`;
+}
+
+// =====================================================================
+// RESEARCH AN AREA — builds the complete Researcher request (rules,
+// output format, Drive file name, exclusion list) and opens Claude with
+// it pre-filled. Self-contained on purpose: it works for any BDM with a
+// Claude account, without needing Michael's Project or skills.
+// Claude truncates pre-filled text at roughly 14,000 characters, so the
+// exclusion list is shortened (and says so) if it would push past that.
+// =====================================================================
+const RESEARCH_MAX_CHARS = 13000;
+
+function buildResearchRequest(area, focus) {
+  const date = todayStr();
+  const title = `${RESEARCH_PREFIX} - ${area} - ${date}`;
+  const head =
+`You are the BioBlue Researcher. BioBlue Australia is an Australian-owned AdBlue® (AUS32) manufacturer and distributor. Request from ${currentBDM}, ${date}, sent from the BioBlue Prospect Tracker.
+
+TASK: find every qualified AdBlue® prospect in: ${area}${focus ? `\nFocus: ${focus}` : ''}
+Targets: diesel-fleet operators that use or will need AdBlue®: transport and haulage, bus and passenger transport, mining and drilling, civil and earthmoving, quarries, fuel resellers, gensets and plant hire.
+For each: what fleet runs from which site, likely volume, current supplier if public, and the named decision maker (fleet, operations, procurement or workshop manager). Grade A = named decision maker + clear fleet + street address; B = good fit, no decision maker yet; C = possible fit, needs a call. Cover the area fully, but leave out anything you can't source. Public sources only, with a source URL for every contact and claim. Never invent a person, phone number or email. If a bioblue-regional-prospecting skill is available, use it.
+
+ALSO, EVERY TIME: NATIONAL SIGNALS AND TENDERS (its own section)
+- Trade news, Australia-wide, last 12 months (Big Rigs, ATN / Prime Mover, Owner//Driver, Trailer Magazine, bus and coach press, Australian Mining, Mining Weekly, quarry and construction press, local news): fleet purchases, contracts won, new depots or sites, mine and project starts, acquisitions, Euro 5/6 upgrades. Each: date, company, what happened, why it matters for AdBlue®, URL.
+- Open tenders (AusTender, Tenders WA, NT Quotations and Tenders Online, buy.nsw, QTenders, SA Tenders and Contracts, Buying for Victoria, Tenders Tasmania, Tenders ACT, councils, ports) covering AdBlue®, AUS32, diesel exhaust fluid, fuel supply, bulk fuel, lubricants or fleet consumables. Each: title, issuer, reference, closing date, scope, URL, fit (Direct / Possible / Watch). Closing within 14 days = URGENT. Public notices only; never register or log in.
+- Mark items inside the searched area as LOCAL.
+
+OUTPUT
+1. In the chat: each lead as a short card (company, address, site type, fleet, decision maker, grade, why, source), A grades first. Then the national section.
+2. The Tracker Import list saved to my Google Drive as a Google Sheet: use the Google Drive connector to create it from CSV content (so it converts to a Google Sheet) inside a folder named "BioBlue Research Inbox" (create the folder if missing), titled exactly "${title}". If the Google Drive connector isn't available, say so and give me an Excel file with a tab named "Tracker Import" instead.
+   Columns in this order, header row first:
+   IMPORT | Company | State | Street Address | Suburb | Postcode | Descriptor | Product Interest | Current Supplier | Est Volume Litres | Volume Period | Contact Name | Contact Role | Contact Phone | Contact Email | KDM Name | KDM Role | KDM Phone | KDM Email | Grade | Why | Source URL
+   Rules: one row per qualified lead. IMPORT = Y on every row. State: ACT, NSW, NT, QLD, SA, TAS, VIC or WA. Descriptor: Depot, Mine, Office, Other, Outside Payment Terminal (Unmanned), Port, Reseller Customer Site, Service Station, Site, Store, Terminal, Warehouse, Workshop or Yard. Est Volume Litres = a number only. Volume Period = "per month" or "per annum". KDM = key decision maker. Give the real street address and suburb wherever it can be sourced (the Tracker uses them to put leads on the map). Unknown = leave blank, never "not found".
+3. Finish with the Drive link and: "Mark any N, then tap Import from Drive in the Prospect Tracker."
+
+RULES: Australian English. Always AdBlue® with the ®. Don't present ISO/VDA certification or local WA manufacture as differentiators. Never quote prices.
+
+EXCLUDE these companies (already in the BioBlue Prospect Tracker or previously rejected):
+`;
+  const names = [...new Set(prospects.filter(p => p.company)
+    .map(p => `${p.company}${p.suburb ? ', ' + p.suburb : ''}${p.state ? ' ' + p.state : ''}`))]
+    .sort((a, b) => a.localeCompare(b));
+  let list = '', included = 0;
+  for (const n of names) {
+    if (head.length + list.length + n.length + 80 > RESEARCH_MAX_CHARS) break;
+    list += n + '\n'; included++;
+  }
+  const shortened = included < names.length;
+  const tail = names.length
+    ? list + (shortened ? `(list shortened: ${names.length - included} more companies are in the Tracker; if you find one that looks familiar, flag it rather than leave it out)\n` : '')
+    : '(none yet)\n';
+  return { text: head + tail, total: names.length, included, shortened };
+}
+
+function openResearchModal() {
+  document.getElementById('researchArea').value = '';
+  document.getElementById('researchFocus').value = '';
+  const n = new Set(prospects.filter(p => p.company).map(p => normKey(p.company))).size;
+  document.getElementById('researchInfo').textContent = n
+    ? `${n} compan${n !== 1 ? 'ies' : 'y'} already in the Tracker will be excluded. Leads you import are assigned to ${currentBDM}.`
+    : `Tap Load first if you have leads in Drive, so they can be excluded.`;
+  document.getElementById('researchModal').classList.add('open');
+}
+function closeResearchModal() { document.getElementById('researchModal').classList.remove('open'); }
+
+function researchRequestOrWarn() {
+  const area = document.getElementById('researchArea').value.trim();
+  if (!area) { showToast('Type an area first'); return null; }
+  return buildResearchRequest(area, document.getElementById('researchFocus').value.trim());
+}
+
+async function copyResearchRequest() {
+  const r = researchRequestOrWarn();
+  if (!r) return;
+  try { await navigator.clipboard.writeText(r.text); showToast('✅ Request copied — paste it into a new Claude chat'); }
+  catch (e) { alert('Could not copy automatically on this device. Use Open Claude instead.'); }
+}
+
+function openResearchInClaude() {
+  const r = researchRequestOrWarn();
+  if (!r) return;
+  // Copy as well (no await: Safari only allows opening a link straight from the tap),
+  // so if Claude opens with an empty box the request is one paste away.
+  try { navigator.clipboard.writeText(r.text).catch(() => {}); } catch (e) {}
+  const a = document.createElement('a');
+  a.href = 'https://claude.ai/new?q=' + encodeURIComponent(r.text);
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  closeResearchModal();
+  showToast(r.shortened
+    ? `Opened Claude — exclusion list shortened to ${r.included} of ${r.total}. Request also copied.`
+    : 'Opened Claude — tap send. (Request also copied, in case the box is empty.)');
 }
 
 // =====================================================================
