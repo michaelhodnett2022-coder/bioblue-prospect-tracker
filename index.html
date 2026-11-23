@@ -272,6 +272,7 @@ body {
 
 <div class="tool-links">
   <span onclick="openResearchModal()" style="color:#4ADE80;font-weight:700;">&#128269; Research an area</span>
+  <span onclick="openAddressModal()" id="missingAddrLink">&#128205; Find missing addresses</span>
   <span onclick="importFromDrive()" style="color:#64d2ff;font-weight:700;">&#9729;&#65039; Import from Drive</span>
   <span onclick="openPasteResearch()">&#128203; Paste research</span>
   <span onclick="document.getElementById('researchFileInput').click()">&#8679; Import research file</span>
@@ -373,6 +374,19 @@ body {
       <button class="btn btn-ghost" onclick="closeResearchModal()">Cancel</button>
       <button class="btn btn-ghost" onclick="copyResearchRequest()">Copy only</button>
       <button class="btn btn-primary" onclick="openResearchInClaude()">Open Claude</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addressModal">
+  <div class="modal-box" style="max-width:440px;">
+    <h3>Find missing addresses</h3>
+    <div id="addressModalInfo" style="font-size:12px;opacity:0.8;margin-bottom:10px;line-height:1.5;"></div>
+    <div style="font-size:11.5px;opacity:0.6;">Claude saves the results to your Drive. Then tap Import from Drive and pick the "Address Update" sheet: matching cards get their addresses and go on the map.</div>
+    <div class="modal-btn-row" style="margin-top:12px;">
+      <button class="btn btn-ghost" onclick="closeAddressModal()">Cancel</button>
+      <button class="btn btn-ghost" onclick="copyAddressRequest()">Copy only</button>
+      <button class="btn btn-primary" id="addressOpenBtn" onclick="openAddressInClaude()">Open Claude</button>
     </div>
   </div>
 </div>
@@ -1212,7 +1226,7 @@ async function importResearchFile(input) {
   if (!file) return;
   try {
     const wb = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array' });
-    const sheetName = wb.SheetNames.includes(IMPORT_SHEET) ? IMPORT_SHEET : wb.SheetNames[0];
+    const sheetName = pickImportSheet(wb);
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
     await importResearchRows(rows, `"${sheetName}"`);
   } catch (e) {
@@ -1223,6 +1237,7 @@ async function importResearchFile(input) {
 // Shared by the file import and the paste import: rows = objects keyed by
 // the header row. Returns true when leads were saved.
 async function importResearchRows(rows, sourceLabel) {
+    if (isAddressUpdate(rows)) return importAddressUpdate(rows, sourceLabel);
     const ok = await ensureConnected();   // merge the latest Drive copy first, so duplicate checks are current
     if (!ok) throw new Error('Could not connect to Drive');
     if (!rows.length) { alert(`No rows found in ${sourceLabel}. Nothing was imported.`); return false; }
@@ -1343,7 +1358,7 @@ async function onResearchPicked(data) {
       rows = parseDelimited(await r.text());
     } else {
       const wb = XLSX.read(new Uint8Array(await r.arrayBuffer()), { type: 'array' });
-      const sheetName = wb.SheetNames.includes(IMPORT_SHEET) ? IMPORT_SHEET : wb.SheetNames[0];
+      const sheetName = pickImportSheet(wb);
       rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
     }
     const done = await importResearchRows(rows, `"${name}"`);
@@ -1601,6 +1616,15 @@ TASK: find every qualified AdBlue® prospect in: ${area}${focus ? `\nFocus: ${fo
 Targets: diesel-fleet operators that use or will need AdBlue®: transport and haulage, bus and passenger transport, mining and drilling, civil and earthmoving, quarries, fuel resellers, gensets and plant hire.
 For each: what fleet runs from which site, likely volume, current supplier if public, and the named decision maker (fleet, operations, procurement or workshop manager). Grade A = named decision maker + clear fleet + street address; B = good fit, no decision maker yet; C = possible fit, needs a call. Cover the area fully, but leave out anything you can't source. Public sources only, with a source URL for every contact and claim. Never invent a person, phone number or email. If a bioblue-regional-prospecting skill is available, use it.
 
+STREET ADDRESS FOR EVERY LEAD (the Tracker puts leads on a map, so this matters)
+Search in this order and stop when you have the site's street address:
+1. The company's own website: open the Contact, About, Locations / Depots / Branches pages and the page footer; also check Terms, Privacy and credit-application pages, which often carry the registered address.
+2. The Google Maps / Google Business listing for the company in that area.
+3. Directories: Yellow Pages, True Local, Hotfrog, iseekplant, Cylex, StartLocal, the local chamber of commerce member list.
+4. The company's LinkedIn page, Facebook "About" section, and industry association member lists.
+5. Public records: council development approvals, environmental licences, tender award notices, job ads (often name the depot).
+Rules: give the depot or yard in the searched area where the fleet is based, not a head office elsewhere (if only the head office can be found, use it and say "head office, local depot not found" in Why). No PO Boxes in Street Address. ABN Lookup shows only state and postcode, so use it to confirm, not as the address. Put the page the address came from in the Address Source URL column. Grade A needs a street address; if every step fails, grade B at most and say "address not found (website, Maps, directories checked)" in Why. End the chat summary with "Street addresses found: X of Y".
+
 ALSO, EVERY TIME: NATIONAL SIGNALS AND TENDERS (its own section)
 - Trade news, Australia-wide, last 12 months (Big Rigs, ATN / Prime Mover, Owner//Driver, Trailer Magazine, bus and coach press, Australian Mining, Mining Weekly, quarry and construction press, local news): fleet purchases, contracts won, new depots or sites, mine and project starts, acquisitions, Euro 5/6 upgrades. Each: date, company, what happened, why it matters for AdBlue®, URL.
 - Open tenders (AusTender, Tenders WA, NT Quotations and Tenders Online, buy.nsw, QTenders, SA Tenders and Contracts, Buying for Victoria, Tenders Tasmania, Tenders ACT, councils, ports) covering AdBlue®, AUS32, diesel exhaust fluid, fuel supply, bulk fuel, lubricants or fleet consumables. Each: title, issuer, reference, closing date, scope, URL, fit (Direct / Possible / Watch). Closing within 14 days = URGENT. Public notices only; never register or log in.
@@ -1610,7 +1634,7 @@ OUTPUT
 1. In the chat: each lead as a short card (company, address, site type, fleet, decision maker, grade, why, source), A grades first. Then the national section.
 2. The Tracker Import list saved to my Google Drive as a Google Sheet: use the Google Drive connector to create it from CSV content (so it converts to a Google Sheet) inside a folder named "BioBlue Research Inbox" (create the folder if missing), titled exactly "${title}". If the Google Drive connector isn't available, say so and give me an Excel file with a tab named "Tracker Import" instead.
    Columns in this order, header row first:
-   IMPORT | Company | State | Street Address | Suburb | Postcode | Descriptor | Product Interest | Current Supplier | Est Volume Litres | Volume Period | Contact Name | Contact Role | Contact Phone | Contact Email | KDM Name | KDM Role | KDM Phone | KDM Email | Grade | Why | Source URL
+   IMPORT | Company | State | Street Address | Suburb | Postcode | Descriptor | Product Interest | Current Supplier | Est Volume Litres | Volume Period | Contact Name | Contact Role | Contact Phone | Contact Email | KDM Name | KDM Role | KDM Phone | KDM Email | Grade | Why | Source URL | Address Source URL
    Rules: one row per qualified lead. IMPORT = Y on every row. State: ACT, NSW, NT, QLD, SA, TAS, VIC or WA. Descriptor: Depot, Mine, Office, Other, Outside Payment Terminal (Unmanned), Port, Reseller Customer Site, Service Station, Site, Store, Terminal, Warehouse, Workshop or Yard. Est Volume Litres = a number only. Volume Period = "per month" or "per annum". KDM = key decision maker. Give the real street address and suburb wherever it can be sourced (the Tracker uses them to put leads on the map). Unknown = leave blank, never "not found".
 3. Finish with the Drive link and: "Mark any N, then tap Import from Drive in the Prospect Tracker."
 
@@ -1674,6 +1698,185 @@ function openResearchInClaude() {
   showToast(r.shortened
     ? `Opened Claude — exclusion list shortened to ${r.included} of ${r.total}. Request also copied.`
     : 'Opened Claude — tap send. (Request also copied, in case the box is empty.)');
+}
+
+// =====================================================================
+// FIND MISSING ADDRESSES — leads in Cold or Pipeline with no street
+// address are sent to Claude (each with its Tracker Ref) to hunt down.
+// The "Address Update" sheet that comes back goes through the normal
+// import buttons; importResearchRows() spots its Ref column and routes it
+// here. Only blank address fields are filled, nothing is overwritten.
+// A lead Claude couldn't find is skipped for 30 days so it doesn't clog
+// every run. Won/Lost/Removed leads are left alone.
+// =====================================================================
+const ADDRESS_SHEET = 'Address Update';
+const ADDRESS_RETRY_DAYS = 30;
+
+function safeUrl(u) { return /^https?:\/\//i.test(u || '') ? u : ''; }
+
+function pickImportSheet(wb) {
+  if (wb.SheetNames.includes(IMPORT_SHEET)) return IMPORT_SHEET;
+  if (wb.SheetNames.includes(ADDRESS_SHEET)) return ADDRESS_SHEET;
+  return wb.SheetNames[0];
+}
+
+function missingAddressLeads() {
+  const today = todayStr();
+  return prospects
+    .filter(p => p.company && !p.streetAddress && (p.status === 'New Lead' || (PIPELINE_STATUSES.includes(p.status) && p.status !== 'Won')))
+    .filter(p => !p.addressSearchedDate || daysBetween(p.addressSearchedDate, today) >= ADDRESS_RETRY_DAYS)
+    .sort((a, b) => (a.addressSearchedDate ? 1 : 0) - (b.addressSearchedDate ? 1 : 0));
+}
+
+function buildAddressRequest() {
+  const date = todayStr();
+  const title = `${RESEARCH_PREFIX} - Address Update - ${date}`;
+  const head =
+`You are the BioBlue Researcher. BioBlue Australia is an Australian-owned AdBlue® (AUS32) manufacturer and distributor. Request from ${currentBDM}, ${date}, sent from the BioBlue Prospect Tracker.
+
+TASK: find the street address of each company listed below. They are prospects already in the BioBlue Prospect Tracker, which puts every lead on a map, so we need the street address of the site where each company's fleet is based.
+
+HOW TO FIND EACH ADDRESS (in this order, stop when found)
+1. The company's own website: open the Contact, About, Locations / Depots / Branches pages and read the footer; also check Terms, Privacy and credit-application pages. Never rely on a search snippet alone.
+2. The Google Maps / Google Business listing for the company in that area.
+3. Directories: Yellow Pages, True Local, Hotfrog, iseekplant, Cylex, StartLocal, local chamber of commerce member lists.
+4. The company's LinkedIn page, Facebook "About" section, industry association member lists.
+5. Public records: council development approvals, environmental licences, tender award notices, job ads.
+Rules: the depot or yard in the suburb or area given, not a head office elsewhere (if only the head office can be found, give it and say so in Note). No PO Boxes. ABN Lookup shows only state and postcode, so use it to confirm, not as the address. Never guess: leave it blank if not found.
+
+OUTPUT
+1. Save the results to my Google Drive as a Google Sheet: use the Google Drive connector to create it from CSV content (so it converts to a Google Sheet) inside the folder "BioBlue Research Inbox" (create it if missing), titled exactly "${title}". If the Google Drive connector isn't available, say so and give me an Excel file with a tab named "Address Update" instead.
+   Columns in this order, header row first:
+   Ref | Company | Street Address | Suburb | State | Postcode | Address Source URL | Note
+   One row for EVERY company below, with its Ref copied exactly. Not found = Street Address blank, and Note says what was checked. State: ACT, NSW, NT, QLD, SA, TAS, VIC or WA.
+2. In the chat: "Addresses found: X of Y", then the ones not found.
+3. Finish with the Drive link and: "Tap Import from Drive in the Prospect Tracker and pick this sheet."
+
+COMPANIES (Ref | Company | what the Tracker knows | website or source, if known)
+`;
+  const leads = missingAddressLeads();
+  let list = '', included = 0;
+  for (const p of leads) {
+    const known = [p.suburb, p.state, p.postcode].filter(Boolean).join(' ') || 'location unknown';
+    const src = safeUrl(p.researchSource) || '';
+    const line = `${p.id} | ${p.company} | ${known}${src ? ' | ' + src : ''}\n`;
+    if (head.length + list.length + line.length + 60 > RESEARCH_MAX_CHARS) break;
+    list += line; included++;
+  }
+  return { text: head + list, total: leads.length, included };
+}
+
+function updateMissingAddressLink() {
+  const el = document.getElementById('missingAddrLink');
+  if (!el) return;
+  const n = missingAddressLeads().length;
+  el.innerHTML = `&#128205; Find missing addresses${n ? ` (${n})` : ''}`;
+}
+
+function openAddressModal() {
+  const r = buildAddressRequest();
+  const info = document.getElementById('addressModalInfo');
+  const btn = document.getElementById('addressOpenBtn');
+  if (!r.total) {
+    info.textContent = 'Every Cold and Pipeline lead already has a street address (or was searched in the last 30 days). Nothing to look up.';
+    btn.disabled = true;
+  } else {
+    info.textContent = r.included < r.total
+      ? `${r.total} leads have no street address. This request covers the first ${r.included} (Claude's length limit); run it again after importing for the rest.`
+      : `${r.total} lead${r.total !== 1 ? 's' : ''} in Cold and Pipeline ha${r.total !== 1 ? 've' : 's'} no street address. Claude will look ${r.total !== 1 ? 'them' : 'it'} up.`;
+    btn.disabled = false;
+  }
+  document.getElementById('addressModal').classList.add('open');
+}
+function closeAddressModal() { document.getElementById('addressModal').classList.remove('open'); }
+
+async function copyAddressRequest() {
+  const r = buildAddressRequest();
+  if (!r.total) { showToast('Nothing to look up'); return; }
+  try { await navigator.clipboard.writeText(r.text); showToast('✅ Request copied — paste it into a new Claude chat'); }
+  catch (e) { alert('Could not copy automatically on this device. Use Open Claude instead.'); }
+}
+
+function openAddressInClaude() {
+  const r = buildAddressRequest();
+  if (!r.total) return;
+  try { navigator.clipboard.writeText(r.text).catch(() => {}); } catch (e) {}
+  const a = document.createElement('a');
+  a.href = 'https://claude.ai/new?q=' + encodeURIComponent(r.text);
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  closeAddressModal();
+  showToast(`Opened Claude with ${r.included} compan${r.included !== 1 ? 'ies' : 'y'} — tap send. (Request also copied.)`);
+}
+
+function isAddressUpdate(rows) {
+  if (!rows.length) return false;
+  const keys = Object.keys(rows[0]).map(normKey);
+  return keys.includes('ref') && keys.includes('streetaddress') && !keys.includes('import');
+}
+
+async function importAddressUpdate(rows, sourceLabel) {
+  const ok = await ensureConnected();
+  if (!ok) throw new Error('Could not connect to Drive');
+  const today = todayStr();
+  const updates = [], notFound = [], unmatched = [], already = [];
+  rows.forEach(r => {
+    const byKey = {};
+    Object.keys(r).forEach(h => { byKey[normKey(h)] = (r[h] === null || r[h] === undefined) ? '' : String(r[h]).trim(); });
+    const ref = byKey.ref, company = byKey.company;
+    if (!ref && !company) return;
+    let p = ref ? findProspect(ref) : null;
+    if (!p && company) p = prospects.find(x => normKey(x.company) === normKey(company) && x.status !== REMOVED && x.status !== THROWN_BACK);
+    if (!p) { unmatched.push(company || ref); return; }
+    if (p.streetAddress) { already.push(p.company); return; }
+    const street = byKey.streetaddress;
+    if (!street || /^po box/i.test(street)) { notFound.push(p); return; }
+    const st = (byKey.state || '').toUpperCase();
+    updates.push({ p, street, suburb: byKey.suburb, postcode: byKey.postcode, state: STATES.includes(st) ? st : '', source: byKey.addresssourceurl, note: byKey.note });
+  });
+
+  if (!updates.length && !notFound.length) {
+    alert(`Nothing to update from ${sourceLabel}.` + (already.length ? `\n\n${already.length} already had an address.` : '') + (unmatched.length ? `\n${unmatched.length} didn't match any lead.` : ''));
+    return false;
+  }
+  const msg =
+    `Address update from ${sourceLabel}:\n\n` +
+    `• Street addresses to add: ${updates.length}\n` +
+    (updates.length ? `   ${updates.slice(0, 6).map(u => `${u.p.company}: ${u.street}${u.suburb ? ', ' + u.suburb : ''}`).join('\n   ')}${updates.length > 6 ? `\n   ...and ${updates.length - 6} more` : ''}\n` : '') +
+    `• Not found (skipped for ${ADDRESS_RETRY_DAYS} days): ${notFound.length}\n` +
+    (already.length ? `• Already had an address (left as is): ${already.length}\n` : '') +
+    (unmatched.length ? `• Didn't match any lead: ${unmatched.length}\n` : '') +
+    `\nGo ahead?`;
+  if (!confirm(msg)) { showToast('Address update cancelled — nothing changed'); return false; }
+
+  const before = new Map([...updates.map(u => u.p), ...notFound].map(p => [p.id, JSON.stringify(p)]));
+  updates.forEach(u => {
+    const p = u.p;
+    p.streetAddress = u.street;
+    // A sourced full address replaces a guessed suburb/postcode; state only if valid.
+    if (u.suburb) p.suburb = u.suburb;
+    if (u.postcode) p.postcode = u.postcode;
+    if (u.state) p.state = u.state;
+    delete p.lat; delete p.lng; delete p.geoAddr; delete p.geoFailed;
+    p.activity.push({ date: today, type: 'note', text: `Street address added from research${u.source ? ' — ' + u.source : ''}${u.note ? ' (' + u.note + ')' : ''}` });
+  });
+  notFound.forEach(p => { p.addressSearchedDate = today; });
+  const saved = await saveTracker();
+  if (!saved) {
+    before.forEach((json, id) => { const i = prospects.findIndex(x => x.id === id); if (i >= 0) prospects[i] = JSON.parse(json); });
+    render();
+    alert('The address update could not be saved to Drive, so nothing was changed. Tap Load and try again.');
+    return false;
+  }
+  // Leads that already have a Client Record get the new address there too (not Won ones).
+  updates.forEach(u => { if (u.p.clientId && u.p.status !== 'Won') queueClientRecordSync(u.p); });
+  render();
+  showToast(`✅ ${updates.length} address${updates.length !== 1 ? 'es' : ''} added`);
+  geocodeMissing(updates.map(u => u.p)).then(n => { if (n) saveTracker(); }).catch(() => {});
+  return true;
 }
 
 // =====================================================================
@@ -2377,6 +2580,7 @@ function escapeHtml(s) {
 }
 
 function render() {
+  updateMissingAddressLink();
   const visible = prospects.filter(p => {
     if (stateFilter !== 'ALL' && p.state !== stateFilter) return false;
     if (bdmFilter !== 'ALL' && p.bdm !== bdmFilter) return false;
