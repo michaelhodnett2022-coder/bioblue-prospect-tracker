@@ -315,7 +315,7 @@ body { background:#071a33 linear-gradient(170deg,#04142a 0%,#0a2a52 55%,#0d3a6e 
 .a-chip { flex:none;display:inline-flex;align-items:center;gap:5px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;padding:7px 10px;
   border-radius:20px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.08);color:white;cursor:pointer;white-space:nowrap; }
 .a-chip .x { opacity:0.55;font-size:11px; }
-.state-chips { display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-bottom:10px;padding-bottom:2px; }
+.state-chips { display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px; }
 .state-chips::-webkit-scrollbar { display:none; }
 .st-chip { flex:none;display:inline-flex;align-items:center;gap:5px;font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:7px 11px;border-radius:20px;
   border:1px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.75);cursor:pointer; }
@@ -327,7 +327,12 @@ body { background:#071a33 linear-gradient(170deg,#04142a 0%,#0a2a52 55%,#0d3a6e 
 .bdm-seg button { font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:5px 12px;border-radius:16px;border:none;background:transparent;color:rgba(255,255,255,0.7);cursor:pointer;white-space:nowrap; }
 .bdm-seg button.on { background:#64d2ff;color:#001f3f; }
 .bdm-seg button .x { margin-left:5px;opacity:0.6;font-size:11px; }
-.st-chip:not(.on):has(.n[data-z]) { opacity:0.45; }
+.state-chips .st-chip { justify-content:center;padding:7px 2px;gap:4px;min-width:0; }
+.st-chip.empty:not(.on) { opacity:0.4; }
+.who-list { display:flex;flex-direction:column;gap:8px;margin-top:14px; }
+.who-list button { font-family:'DM Sans',sans-serif;font-size:15px;font-weight:700;padding:14px;border-radius:12px;cursor:pointer;
+  background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);color:white;text-align:left; }
+.who-list button:active { background:#64d2ff;color:#001f3f; }
 .section-label { margin:18px 2px 8px; }
 .p-card { border-radius:16px;padding:12px 14px 12px 16px;margin-bottom:8px;background:rgba(255,255,255,0.065);border-color:rgba(255,255,255,0.09);transition:transform .15s; }
 .p-card::before { width:4px;background:var(--bar,var(--accent,#64d2ff)); }
@@ -580,6 +585,14 @@ body.sheet-open { overflow:hidden; }
       <button class="btn btn-ghost" onclick="closeLostModal()">Cancel</button>
       <button class="btn btn-primary" onclick="confirmMarkLost()">Confirm</button>
     </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="whoModal">
+  <div class="modal-box">
+    <h3>Who's using this phone?</h3>
+    <div style="font-size:12px;opacity:0.7;line-height:1.5;">The app opens on your leads and puts new leads under your name. You only do this once &mdash; change it any time with the initials button at the top.</div>
+    <div class="who-list" id="whoList"></div>
   </div>
 </div>
 
@@ -2617,11 +2630,10 @@ function toggleStateFilter(st) {
 function renderStateChips(counts) {
   const wrap = document.getElementById('stateChips');
   if (!wrap) return;
-  const chip = (key, label, on, n) =>
-    `<button class="st-chip${on ? ' on' : ''}" onclick="toggleStateFilter('${key}')"><span class="tick">${on ? '&#10003;' : ''}</span>${label}${n !== undefined ? ` <span class="n"${n ? '' : ' data-z'}>${n}</span>` : ''}</button>`;
-  // States with leads first (busiest first), so your own states sit on screen; empty ones trail behind, dimmed.
-  const order = STATES.slice().sort((a, b) => (counts[b] || 0) - (counts[a] || 0) || a.localeCompare(b));
-  wrap.innerHTML = chip('ALL', 'All', !stateFilter.size) + order.map(st => chip(st, st, stateFilter.has(st), counts[st] || 0)).join('');
+  // Two fixed rows (All + 8 states), same order for everyone; states with no leads in view are greyed.
+  const chip = (key, label, on, empty) =>
+    `<button class="st-chip${on ? ' on' : ''}${empty ? ' empty' : ''}" onclick="toggleStateFilter('${key}')"><span class="tick">${on ? '&#10003;' : ''}</span>${label}</button>`;
+  wrap.innerHTML = chip('ALL', 'All', !stateFilter.size, false) + STATES.map(st => chip(st, st, stateFilter.has(st), !counts[st])).join('');
 }
 
 function setBdmFilter(name) {
@@ -3100,6 +3112,21 @@ function render() {
 populateBdmDropdowns();
 populateStateDropdowns();
 updateBdmInitials();
+// First visit on this phone: ask who's using it rather than quietly defaulting to Michael.
+(function askWhoOnFirstUse() {
+  let chosen = null;
+  try { chosen = localStorage.getItem('bb_tracker_bdm'); } catch (e) {}
+  if (chosen) return;
+  document.getElementById('whoList').innerHTML = BDM_LIST.map(n =>
+    `<button onclick="pickWho('${n.replace(/'/g, "\\'")}')">${escapeHtml(n)}</button>`).join('');
+  document.getElementById('whoModal').classList.add('open');
+})();
+function pickWho(name) {
+  document.getElementById('whoModal').classList.remove('open');
+  const sel = document.getElementById('actingAsBDM');
+  if (sel) sel.value = name;
+  setCurrentBDM(name);
+}
 initSwipe();
 render();
 </script>
