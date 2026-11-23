@@ -5,7 +5,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Prospect Tracker">
@@ -259,6 +259,101 @@ body {
 .near-line a { color:#a8d4f5;margin-left:8px; }
 .tool-links { text-align:center;margin-bottom:16px;display:flex;justify-content:center;gap:16px;flex-wrap:wrap; }
 .tool-links span { font-size:11px;color:rgba(255,255,255,0.55);text-decoration:underline;cursor:pointer; }
+/* ===== SLICK UI (v2 layout) ===== */
+body { background:#071a33 linear-gradient(170deg,#04142a 0%,#0a2a52 55%,#0d3a6e 100%) fixed; }
+.page { padding:0 14px 120px; }
+.topbar {
+  position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:8px;
+  margin:0 -14px 6px;padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;
+  background:rgba(4,20,42,0.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-bottom:1px solid rgba(255,255,255,0.08);
+}
+.tb-back { color:#a8d4f5;text-decoration:none;font-size:26px;line-height:1;padding:0 4px 2px 0; }
+.tb-brand { flex:1;display:flex;align-items:center;gap:9px;min-width:0; }
+.tb-kicker { font-family:'DM Mono',monospace;font-size:9.5px;letter-spacing:2px;color:#7fbfe9; }
+.tb-title { font-size:18px;font-weight:700;letter-spacing:-0.3px;line-height:1.1; }
+.tb-bdm { position:relative;display:inline-flex;align-items:center;justify-content:center;gap:3px;height:36px;padding:0 10px;
+  border-radius:18px;background:rgba(100,210,255,0.14);border:1px solid rgba(100,210,255,0.35);color:#bfe6ff;font-size:12.5px;font-weight:700;cursor:pointer; }
+.tb-bdm::after { content:'\25BE';font-size:10px;opacity:0.7; }
+.tb-bdm select { position:absolute;inset:0;opacity:0;width:100%;font-size:16px;cursor:pointer; }
+.tb-icon { position:relative;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);
+  color:white;font-size:17px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-family:inherit; }
+.sync-dot { position:absolute;top:2px;right:2px;width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,0.3);border:2px solid #061a33; }
+.status-line { display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:rgba(255,255,255,0.5);padding:2px 2px 10px;min-height:22px; }
+.status-line .sep { opacity:0.4; }
+.status-line .sep:has(+ #authStatus:empty) { display:none; }
+.connect-card { display:flex;align-items:center;gap:12px;padding:14px;margin-bottom:12px;border-radius:var(--radius);
+  background:linear-gradient(135deg,rgba(100,210,255,0.18),rgba(100,210,255,0.06));border:1px solid rgba(100,210,255,0.35); }
+.connect-card > div { flex:1;font-size:13.5px; }
+.connect-card small { display:block;font-size:11.5px;opacity:0.65;margin-top:2px;font-weight:400; }
+.connect-card .btn { padding:11px 18px;font-size:13px; }
+.action-row { display:flex;gap:8px;margin-bottom:12px; }
+.act-btn { flex:1;font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:10px 6px;border-radius:12px;cursor:pointer;
+  background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.14);color:rgba(255,255,255,0.85);white-space:nowrap; }
+.act-btn.act-green { color:#4ADE80;border-color:rgba(74,222,128,0.4); }
+.act-btn.act-blue { color:#64d2ff;border-color:rgba(100,210,255,0.4); }
+.act-btn.act-amber { color:#fbbf24;border-color:rgba(251,191,36,0.4); }
+.search-wrap { margin-bottom:10px; }
+.search-wrap input { border-radius:12px;padding:12px 14px;font-size:16px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.14); }
+.view-tabs { gap:0;padding:4px;border-radius:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);margin-bottom:10px; }
+.view-tab { border:none;background:transparent;border-radius:10px;padding:8px 4px;font-size:13.5px;transition:background .15s,color .15s; }
+.view-tab.active { background:#64d2ff;color:#001f3f;box-shadow:0 2px 10px rgba(100,210,255,0.3); }
+.view-tab small { font-size:10.5px; }
+.near-bar { flex-wrap:wrap;gap:6px;margin-bottom:10px; }
+.near-btn { width:42px;height:40px;padding:0;border-radius:12px;font-size:17px;flex:none;border:1px solid rgba(74,222,128,0.45); }
+.near-btn.active { font-size:15px; }
+.place-input { min-width:0;height:40px;border-radius:12px;font-size:16px;padding:0 12px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.14); }
+.near-bar select { height:40px;border-radius:12px;padding:0 8px;font-size:13px;flex:none;border:1px solid rgba(255,255,255,0.14); }
+.near-info:empty { display:none; }
+.near-info { padding:0 2px; }
+.filter-row { display:flex;align-items:center;gap:6px;margin-bottom:4px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px; }
+.filter-row::-webkit-scrollbar { display:none; }
+.filter-btn { flex:none;font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:8px 13px;border-radius:20px;cursor:pointer;
+  background:transparent;border:1px solid rgba(255,255,255,0.22);color:rgba(255,255,255,0.8); }
+.filter-btn.has-active { background:rgba(100,210,255,0.16);border-color:#64d2ff;color:#bfe6ff; }
+.active-chips { display:flex;gap:6px;flex:none; }
+.a-chip { flex:none;display:inline-flex;align-items:center;gap:5px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;padding:7px 10px;
+  border-radius:20px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.08);color:white;cursor:pointer;white-space:nowrap; }
+.a-chip .x { opacity:0.55;font-size:11px; }
+.section-label { margin:18px 2px 8px; }
+.p-card { border-radius:16px;padding:12px 14px 12px 16px;margin-bottom:8px;background:rgba(255,255,255,0.065);border-color:rgba(255,255,255,0.09);transition:transform .15s; }
+.p-card::before { width:4px;background:var(--bar,var(--accent,#64d2ff)); }
+.p-card:active { transform:scale(0.995); }
+.p-type { font-size:10.5px;margin-bottom:2px; }
+.p-company { font-size:15.5px;letter-spacing:-0.2px; }
+.p-meta { font-size:11.5px;opacity:0.55;margin-top:2px; }
+.p-followup { margin-top:5px; }
+.p-status-badge { font-size:9.5px;padding:3px 8px; }
+.fab { position:fixed;right:18px;bottom:calc(env(safe-area-inset-bottom) + 22px);z-index:70;width:58px;height:58px;border-radius:50%;border:none;
+  background:#64d2ff;color:#001f3f;font-size:30px;font-weight:400;line-height:1;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.35),0 0 0 4px rgba(100,210,255,0.15); }
+.toast, .undo-bar { bottom:calc(env(safe-area-inset-bottom) + 94px); }
+body.sheet-open { overflow:hidden; }
+.sheet-overlay { position:fixed;inset:0;z-index:250;background:rgba(0,10,25,0);pointer-events:none;transition:background .2s; }
+.sheet-overlay.open { background:rgba(0,10,25,0.55);pointer-events:auto; }
+.sheet { position:absolute;left:0;right:0;bottom:0;max-width:560px;margin:0 auto;max-height:86vh;overflow-y:auto;
+  background:#0b2547;border:1px solid rgba(255,255,255,0.12);border-bottom:none;border-radius:22px 22px 0 0;
+  padding:8px 18px calc(env(safe-area-inset-bottom) + 18px);transform:translateY(105%);transition:transform .25s cubic-bezier(.2,.8,.2,1); }
+.sheet-overlay.open .sheet { transform:translateY(0); }
+.sheet-grip { width:40px;height:5px;border-radius:3px;background:rgba(255,255,255,0.25);margin:4px auto 12px; }
+.sheet-head { display:flex;align-items:center;justify-content:space-between;margin-bottom:6px; }
+.sheet-head h3 { font-size:17px; }
+.link-btn { background:none;border:none;color:#64d2ff;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer; }
+.sheet-label { font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,0.45);margin:16px 0 8px; }
+.sheet-row { display:flex;gap:8px; }
+.sheet select, .sheet input[type=text] { flex:1;width:100%;padding:11px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.18);
+  background:rgba(255,255,255,0.07);color:white;font-family:'DM Sans',sans-serif;font-size:16px; }
+.sheet select option { background:#003466;color:white; }
+.sheet input::placeholder { color:rgba(255,255,255,0.4); }
+.sheet .type-chips, .chip-wrap { display:flex;gap:6px;flex-wrap:wrap;margin:0; }
+.sheet .type-chip, .sheet .filter-pill { font-size:12.5px;padding:8px 12px;border-radius:18px; }
+.sheet-done { width:100%;margin-top:20px;padding:14px;font-size:14px;border-radius:14px; }
+.new-lead-fields { display:flex;flex-direction:column;gap:8px; }
+.menu-item { display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:13px 4px;background:none;border:none;
+  border-bottom:1px solid rgba(255,255,255,0.07);color:white;font-family:'DM Sans',sans-serif;font-size:14.5px;font-weight:600;cursor:pointer;text-decoration:none; }
+.menu-item:last-child { border-bottom:none; }
+.menu-item .mi-ico { width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,0.08);display:inline-flex;align-items:center;justify-content:center;font-size:16px;flex:none; }
+.menu-item small { display:block;font-size:11.5px;font-weight:400;opacity:0.55;margin-top:1px; }
+.menu-group { font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:14px 4px 2px; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -266,63 +361,29 @@ body {
 <body>
 <div class="page">
 
-<button onclick="forceRefresh()" title="Force refresh to the latest version"
-  style="position:fixed;top:12px;right:12px;z-index:50;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);color:white;font-size:17px;cursor:pointer;">&#8635;</button>
+<header class="topbar">
+  <a class="tb-back" href="https://michaelhodnett2022-coder.github.io/bioblue-field-tools" aria-label="Field Tools Hub">&#8249;</a>
+  <div class="tb-brand"><div class="logo-dot"></div><div><div class="tb-kicker">BIOBLUE</div><div class="tb-title">Prospects</div></div></div>
+  <label class="tb-bdm" title="Acting as"><span id="bdmInitials">MH</span><select id="actingAsBDM" onchange="setCurrentBDM(this.value)" aria-label="Acting as"></select></label>
+  <button class="tb-icon" onclick="loadTracker()" title="Load the latest from Drive" aria-label="Sync"><span class="sync-dot" id="saveStatusDot"></span>&#8635;</button>
+  <button class="tb-icon" onclick="openSheet('toolsSheet')" title="Tools" aria-label="Tools">&#8943;</button>
+</header>
 
-<a class="back-link" href="https://michaelhodnett2022-coder.github.io/bioblue-field-tools">&larr; Field Tools Hub</a>
+<div class="status-line" id="saveStatus"><span id="saveStatusText">Not connected yet</span><span class="sep">&middot;</span><span id="authStatus"></span></div>
 
-<div class="header">
-  <div class="logo-wrap"><div class="logo-dot"></div><div class="logo-text">BIOBLUE</div></div>
-  <h1>Prospect Tracker</h1>
-  <p>Cold-call lead tracking · All states</p>
-</div>
-
-<div class="auth-bar">
-  <div class="auth-status" id="authStatus">Tap Load to see prospects already in Drive</div>
-  <button class="btn btn-ghost" onclick="manualSave()">&#128190; Save</button>
+<div class="connect-card" id="connectCard">
+  <div><b>Load your prospects</b><small>Connects to Google Drive and brings in the latest list</small></div>
   <button class="btn btn-primary" onclick="loadTracker()">&#9729;&#65039; Load</button>
 </div>
-<div id="saveStatus" style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;padding:6px 4px 14px;color:rgba(255,255,255,0.4);">
-  <span id="saveStatusDot" style="width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,0.3);flex-shrink:0;"></span>
-  <span id="saveStatusText">Not connected yet &mdash; will connect automatically on your first edit</span>
-</div>
 
-<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-  <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);white-space:nowrap;">Acting as</label>
-  <select id="actingAsBDM" onchange="setCurrentBDM(this.value)" style="flex:1;padding:8px 10px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.1);color:white;font-family:'DM Sans',sans-serif;font-size:12.5px;">
-  </select>
-</div>
-
-<div class="tool-links">
-  <span onclick="openResearchModal()" style="color:#4ADE80;font-weight:700;">&#128269; Research an area</span>
-  <span onclick="openAddressModal()" id="missingAddrLink">&#129513; Fill missing details</span>
-  <span onclick="importFromDrive()" style="color:#64d2ff;font-weight:700;">&#9729;&#65039; Import from Drive</span>
-  <span onclick="openPasteResearch()">&#128203; Paste research</span>
-  <span onclick="document.getElementById('researchFileInput').click()">&#8679; Import research file</span>
-  <span onclick="openExclusionList()">Copy exclusion list for research</span>
-  <input type="file" id="researchFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importResearchFile(this)">
-</div>
-
-<div class="new-lead-card">
-  <div class="new-lead-title" id="newLeadToggle" onclick="toggleNewLead()">
-    <span>+ Add new lead</span><span id="newLeadChevron">&#9662;</span>
-  </div>
-  <div class="new-lead-fields" id="newLeadFields">
-    <input type="text" id="nlCompany" placeholder="Company name">
-    <div class="new-lead-row">
-      <select id="nlState"></select>
-      <input type="text" id="nlContactName" placeholder="Contact name (optional)">
-    </div>
-    <div class="new-lead-row">
-      <input type="text" id="nlContactPhone" placeholder="Phone (optional)">
-      <input type="text" id="nlContactEmail" placeholder="Email (optional)">
-    </div>
-    <button class="btn btn-primary" style="margin-top:4px;" onclick="addNewLead()">Add lead</button>
-  </div>
+<div class="action-row">
+  <button class="act-btn act-green" onclick="openResearchModal()">&#128269; Research</button>
+  <button class="act-btn act-blue" onclick="importFromDrive()">&#9729;&#65039; Import</button>
+  <button class="act-btn act-amber" id="missingAddrLink" onclick="openAddressModal()" style="display:none;">&#129513; Fill details</button>
 </div>
 
 <div class="search-wrap">
-  <input type="text" id="searchBox" placeholder="Search by company, contact or suburb..." oninput="setSearchFilter(this.value)" autocomplete="off">
+  <input type="text" id="searchBox" placeholder="Search company, contact or suburb" oninput="setSearchFilter(this.value)" autocomplete="off">
 </div>
 
 <div class="view-tabs">
@@ -332,39 +393,20 @@ body {
 </div>
 
 <div class="near-bar">
-  <button class="near-btn" id="nearBtn" onclick="toggleNearMe()">&#128205; Near me</button>
-  <input type="text" class="place-input" id="placeSearch" placeholder="or type a place, e.g. Osborne Park" autocomplete="off" onfocus="initPlaceSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchPlaceText(this.value);}">
-  <select id="nearRadius" onchange="setNearRadius(this.value)">
-    <option value="5">Within 5 km</option>
-    <option value="10" selected>Within 10 km</option>
-    <option value="25">Within 25 km</option>
-    <option value="50">Within 50 km</option>
-    <option value="all">Any distance</option>
+  <button class="near-btn" id="nearBtn" onclick="toggleNearMe()" title="Near me" aria-label="Near me">&#128205;</button>
+  <input type="text" class="place-input" id="placeSearch" placeholder="Plan around a suburb&hellip;" autocomplete="off" onfocus="initPlaceSearch()" onkeydown="if(event.key==='Enter'){event.preventDefault();searchPlaceText(this.value);}">
+  <select id="nearRadius" onchange="setNearRadius(this.value)" aria-label="Distance">
+    <option value="10">10 km</option>
+    <option value="20" selected>20 km</option>
+    <option value="50">50 km</option>
+    <option value="all">Any</option>
   </select>
   <div class="near-info" id="nearInfo"></div>
 </div>
 
-<div class="filter-bar">
-  <select id="stateFilterSelect" onchange="setStateFilter(this.value)" style="padding:6px 10px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.7);font-size:12px;font-weight:700;font-family:'DM Sans',sans-serif;">
-    <option value="ALL">All states</option>
-  </select>
-  <select id="bdmFilterSelect" onchange="setBdmFilter(this.value)" style="padding:6px 10px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.7);font-size:12px;font-weight:700;font-family:'DM Sans',sans-serif;">
-    <option value="ALL">All BDMs</option>
-  </select>
-</div>
-
-<div class="type-chips" id="typeChips"></div>
-
-<div class="filter-bar" id="stageStrip"></div>
-
-<div class="sort-row" id="sortRow">
-  <select id="coldSort" onchange="setColdSort(this.value)">
-    <option value="oldest">Sort: oldest first</option>
-    <option value="grade">Sort: grade A first</option>
-    <option value="suburb">Sort: suburb A&ndash;Z</option>
-    <option value="company">Sort: company A&ndash;Z</option>
-    <option value="type">Sort: business type</option>
-  </select>
+<div class="filter-row">
+  <button class="filter-btn" id="filterBtn" onclick="openSheet('filterSheet')">&#9881; Filters</button>
+  <div class="active-chips" id="activeChips"></div>
 </div>
 
 <div id="dashboard"></div>
@@ -388,15 +430,72 @@ body {
   </div>
 </div>
 
-<div class="modal-overlay" id="exclusionModal">
-  <div class="modal-box" style="max-width:440px;">
-    <h3>Exclusion list for research</h3>
-    <div style="font-size:11.5px;opacity:0.7;margin-bottom:10px;">Every company already in the Tracker, plus everything you marked N on import. Paste it into your Researcher request so these are left out.</div>
-    <textarea id="exclusionText" readonly style="width:100%;height:220px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:white;font-family:'DM Mono',monospace;font-size:11px;padding:8px;"></textarea>
-    <div class="modal-btn-row" style="margin-top:12px;">
-      <button class="btn btn-ghost" onclick="closeExclusionList()">Close</button>
-      <button class="btn btn-primary" onclick="copyExclusionList()">Copy</button>
+<button class="fab" onclick="openNewLead()" title="Add new lead" aria-label="Add new lead">+</button>
+
+<div class="sheet-overlay" id="filterSheet" onclick="if(event.target===this)closeSheet('filterSheet')">
+  <div class="sheet">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h3>Filters</h3><button class="link-btn" onclick="clearAllFilters()">Reset</button></div>
+    <div class="sheet-label">State &amp; BDM</div>
+    <div class="sheet-row">
+      <select id="stateFilterSelect" onchange="setStateFilter(this.value)"><option value="ALL">All states</option></select>
+      <select id="bdmFilterSelect" onchange="setBdmFilter(this.value)"><option value="ALL">All BDMs</option></select>
     </div>
+    <div class="sheet-label">Business type</div>
+    <div class="type-chips" id="typeChips"></div>
+    <div id="stageBlock">
+      <div class="sheet-label">Stage</div>
+      <div class="chip-wrap" id="stageStrip"></div>
+    </div>
+    <div id="sortRow">
+      <div class="sheet-label">Sort the cold list</div>
+      <select id="coldSort" onchange="setColdSort(this.value)">
+        <option value="oldest">Oldest first</option>
+        <option value="grade">Grade A first</option>
+        <option value="suburb">Suburb A&ndash;Z</option>
+        <option value="company">Company A&ndash;Z</option>
+        <option value="type">Business type</option>
+      </select>
+    </div>
+    <button class="btn btn-primary sheet-done" onclick="closeSheet('filterSheet')">Show <span id="filterResultCount">0</span> leads</button>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="newLeadSheet" onclick="if(event.target===this)closeSheet('newLeadSheet')">
+  <div class="sheet">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h3>Add new lead</h3><button class="link-btn" onclick="closeSheet('newLeadSheet')">Cancel</button></div>
+    <div class="new-lead-fields" id="newLeadFields">
+      <input type="text" id="nlCompany" placeholder="Company name">
+      <div class="sheet-row">
+        <select id="nlState"></select>
+        <input type="text" id="nlContactName" placeholder="Contact (optional)">
+      </div>
+      <div class="sheet-row">
+        <input type="text" id="nlContactPhone" placeholder="Phone (optional)">
+        <input type="text" id="nlContactEmail" placeholder="Email (optional)">
+      </div>
+      <button class="btn btn-primary sheet-done" style="margin-top:8px;" onclick="addNewLead()">Add to Cold</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="toolsSheet" onclick="if(event.target===this)closeSheet('toolsSheet')">
+  <div class="sheet">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h3>Tools</h3><button class="link-btn" onclick="closeSheet('toolsSheet')">Done</button></div>
+    <div class="menu-group">Find leads</div>
+    <button class="menu-item" onclick="toolAction(openResearchModal)"><span class="mi-ico">&#128269;</span><span>Research an area<small>Claude finds new prospects and saves them to Drive</small></span></button>
+    <button class="menu-item" onclick="toolAction(importFromDrive)"><span class="mi-ico">&#9729;&#65039;</span><span>Import from Drive<small>Bring in a Research Inbox sheet</small></span></button>
+    <button class="menu-item" onclick="toolAction(openAddressModal)"><span class="mi-ico">&#129513;</span><span id="toolsMissing">Fill missing details<small>Addresses and business types</small></span></button>
+    <div class="menu-group">Backup import</div>
+    <button class="menu-item" onclick="toolAction(openPasteResearch)"><span class="mi-ico">&#128203;</span><span>Paste research<small>If Import from Drive won't open</small></span></button>
+    <button class="menu-item" onclick="toolAction(()=>document.getElementById('researchFileInput').click())"><span class="mi-ico">&#8679;</span><span>Import research file<small>An .xlsx or .csv saved on this device</small></span></button>
+    <input type="file" id="researchFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importResearchFile(this)">
+    <div class="menu-group">App</div>
+    <button class="menu-item" onclick="toolAction(manualSave)"><span class="mi-ico">&#128190;</span><span>Save now<small>Edits already save automatically</small></span></button>
+    <button class="menu-item" onclick="toolAction(forceRefresh)"><span class="mi-ico">&#10227;</span><span>Update app<small>Reload to the newest version</small></span></button>
+    <a class="menu-item" href="https://michaelhodnett2022-coder.github.io/bioblue-field-tools"><span class="mi-ico">&#8249;</span><span>Field Tools Hub</span></a>
   </div>
 </div>
 
@@ -1074,7 +1173,7 @@ async function fetchAndMergeProspects() {
   const driveIds = new Set(driveProspects.map(p => p.id));
   const localOnly = prospects.filter(p => !driveIds.has(p.id));
   prospects = [...localOnly, ...driveProspects];
-  setAuthStatus(`\u2705 ${prospects.length} prospect${prospects.length!==1?'s':''} loaded`);
+  setAuthStatus(`${prospects.length} prospect${prospects.length!==1?'s':''}`);
   render();
 }
 
@@ -1447,23 +1546,6 @@ async function importPastedResearch() {
   }
 }
 
-function openExclusionList() {
-  const lines = prospects
-    .filter(p => p.company)
-    .map(p => `${p.company}${p.suburb ? ', ' + p.suburb : ''}${p.state ? ' ' + p.state : ''}${p.status === THROWN_BACK ? ' (marked N)' : p.status === REMOVED ? ' (removed)' : ''}`)
-    .sort((a, b) => a.localeCompare(b));
-  document.getElementById('exclusionText').value = lines.length
-    ? 'Exclude these companies (already in the Prospect Tracker or previously marked N):\n' + lines.join('\n')
-    : 'No companies in the Tracker yet.';
-  document.getElementById('exclusionModal').classList.add('open');
-}
-function closeExclusionList() { document.getElementById('exclusionModal').classList.remove('open'); }
-async function copyExclusionList() {
-  const ta = document.getElementById('exclusionText');
-  try { await navigator.clipboard.writeText(ta.value); showToast('✅ Copied — paste it into your Researcher request'); }
-  catch (e) { ta.removeAttribute('readonly'); ta.select(); showToast('Select all and copy'); }
-}
-
 // Cold <-> Pipeline. Switching resets the stage filter (stages only apply to Pipeline).
 function setViewMode(mode) {
   viewMode = ['cold', 'today'].includes(mode) ? mode : 'pipeline';
@@ -1485,7 +1567,7 @@ function setViewMode(mode) {
 const MAPS_API_KEY = 'AIzaSyBb-EHe4hw-UmY9xFNRDMwbf-A27S2WbPQ';
 const ADDRESS_FIELDS = ['streetAddress', 'suburb', 'postcode', 'state'];
 let nearMode = false;
-let nearRadiusKm = 10;
+let nearRadiusKm = 20;
 let myPos = null;            // { lat, lng, at } — memory only
 let nearDist = new Map();    // lead id -> km, for the current render only
 let _mapsPromise = null;
@@ -1597,6 +1679,7 @@ async function searchPlaceText(text) {
     info.textContent = 'Finding ' + text + '...';
     await loadMaps();
     const r = await geocodeOne(new google.maps.Geocoder(), /australia/i.test(text) ? text : text + ', Australia');
+    if (r.status === 'REQUEST_DENIED') { info.textContent = '\u26A0\uFE0F Google Maps is switched off for this app (check billing in Google Cloud)'; return; }
     if (r.status !== 'OK' || !r.results || !r.results[0]) { info.textContent = '\u26A0\uFE0F Could not find "' + text + '" \u2014 try a suburb name'; return; }
     const loc = r.results[0].geometry.location;
     setNearOrigin(loc.lat(), loc.lng(), text);
@@ -1646,7 +1729,8 @@ function setNearRadius(v) {
 function updateNearBar(keepInfo) {
   const btn = document.getElementById('nearBtn');
   btn.classList.toggle('active', nearMode);
-  btn.innerHTML = nearMode ? '&#10005; Clear near me' : '&#128205; Near me';
+  btn.innerHTML = nearMode ? '&#10005;' : '&#128205;';
+  btn.title = nearMode ? 'Clear distance sort' : 'Near me';
   if (keepInfo) return;
   const info = document.getElementById('nearInfo');
   info.innerHTML = nearMode && myPos
@@ -1976,7 +2060,10 @@ function updateMissingAddressLink() {
   const el = document.getElementById('missingAddrLink');
   if (!el) return;
   const n = missingAddressLeads().length;
-  el.innerHTML = `&#129513; Fill missing details${n ? ` (${n})` : ''}`;
+  el.style.display = n ? '' : 'none';
+  el.innerHTML = `&#129513; Fill ${n}`;
+  const t = document.getElementById('toolsMissing');
+  if (t) t.innerHTML = `Fill missing details${n ? ` (${n})` : ''}<small>${n ? 'Leads missing an address or business type' : 'Nothing missing right now'}</small>`;
 }
 
 function openAddressModal() {
@@ -2164,11 +2251,22 @@ function undoRemoveLead() {
 // =====================================================================
 // NEW LEAD
 // =====================================================================
-function toggleNewLead() {
-  document.getElementById('newLeadFields').classList.toggle('open');
-  const open = document.getElementById('newLeadFields').classList.contains('open');
-  document.getElementById('newLeadChevron').textContent = open ? '\u2303' : '\u2325';
+// ---- Bottom sheets (Filters, Add new lead, Tools)
+function openSheet(id) {
+  document.getElementById(id).classList.add('open');
+  document.body.classList.add('sheet-open');
 }
+function closeSheet(id) {
+  document.getElementById(id).classList.remove('open');
+  if (!document.querySelector('.sheet-overlay.open')) document.body.classList.remove('sheet-open');
+}
+function openNewLead() {
+  openSheet('newLeadSheet');
+  setTimeout(() => document.getElementById('nlCompany').focus(), 280);
+}
+// Tools menu: close the sheet, then run the action in the same tap (the
+// Drive picker and file chooser need to start from a real tap).
+function toolAction(fn) { closeSheet('toolsSheet'); fn(); }
 
 function addNewLead() {
   const company = document.getElementById('nlCompany').value.trim();
@@ -2192,6 +2290,7 @@ function addNewLead() {
   prospects.unshift(p);
   ['nlCompany','nlContactName','nlContactPhone','nlContactEmail'].forEach(id => document.getElementById(id).value = '');
   saveTracker();
+  closeSheet('newLeadSheet');
   render();
   showToast('Added to Cold \u2014 log a call, email or visit to move it into Pipeline');
 }
@@ -2511,6 +2610,8 @@ function setStageFilter(s) {
 function renderStageStrip(counts) {
   const strip = document.getElementById('stageStrip');
   if (!strip) return;
+  const block = document.getElementById('stageBlock');
+  if (block) block.style.display = viewMode === 'pipeline' ? '' : 'none';
   if (viewMode !== 'pipeline') { strip.innerHTML = ''; return; }
   const stages = PIPELINE_STATUSES;
   strip.innerHTML = stages.map(s =>
@@ -2527,6 +2628,43 @@ function setCurrentBDM(name) {
   bdmFilter = name;
   const filterSelect = document.getElementById('bdmFilterSelect');
   if (filterSelect) filterSelect.value = name;
+  updateBdmInitials();
+  render();
+}
+
+function updateBdmInitials() {
+  const el = document.getElementById('bdmInitials');
+  if (el) el.textContent = currentBDM.split(/\s+/).map(w => w[0] || '').join('').toUpperCase();
+}
+
+// ---- Active-filter chips beside the Filters button. "Default" means:
+// all states, your own leads, every type, every stage.
+function renderActiveFilters(resultCount) {
+  const chips = [];
+  if (stateFilter !== 'ALL') chips.push({ k: 'state', label: stateFilter });
+  if (bdmFilter !== currentBDM) chips.push({ k: 'bdm', label: bdmFilter === 'ALL' ? 'All BDMs' : bdmFilter });
+  if (stageFilter !== 'ALL') chips.push({ k: 'stage', label: stageFilter });
+  typeFilter.forEach(t => { const ti = typeInfo(t); chips.push({ k: 'type:' + t, label: t === '__none' ? 'No type yet' : t, color: ti ? ti.color : null }); });
+  const wrap = document.getElementById('activeChips');
+  if (wrap) wrap.innerHTML = chips.map(c =>
+    `<button class="a-chip" data-k="${escapeHtml(c.k)}" onclick="clearFilter(this.dataset.k)">${c.color ? `<span class="type-dot" style="background:${c.color};"></span>` : ''}${escapeHtml(c.label)}<span class="x">&#10005;</span></button>`
+  ).join('');
+  const btn = document.getElementById('filterBtn');
+  if (btn) { btn.classList.toggle('has-active', chips.length > 0); btn.innerHTML = '&#9881; Filters' + (chips.length ? ' &middot; ' + chips.length : ''); }
+  const rc = document.getElementById('filterResultCount');
+  if (rc) rc.textContent = resultCount;
+}
+function clearFilter(k) {
+  if (k === 'state') { stateFilter = 'ALL'; document.getElementById('stateFilterSelect').value = 'ALL'; }
+  else if (k === 'bdm') { bdmFilter = currentBDM; document.getElementById('bdmFilterSelect').value = currentBDM; }
+  else if (k === 'stage') stageFilter = 'ALL';
+  else if (k && k.startsWith('type:')) typeFilter.delete(k.slice(5));
+  render();
+}
+function clearAllFilters() {
+  stateFilter = 'ALL'; bdmFilter = currentBDM; stageFilter = 'ALL'; typeFilter.clear();
+  document.getElementById('stateFilterSelect').value = 'ALL';
+  document.getElementById('bdmFilterSelect').value = currentBDM;
   render();
 }
 
@@ -2598,16 +2736,16 @@ function cardHtml(p) {
   const bt = typeInfo(p.businessType);
   const planned = isPlannedToday(p);
   return `
-  <div class="p-card" style="--accent:${accent};" data-id="${p.id}">
+  <div class="p-card" style="--accent:${accent};${bt ? `--bar:${bt.color};` : ''}" data-id="${p.id}">
     <div class="p-card-top" onclick="toggleCard('${p.id}')">
       <div>
         ${bt ? `<div class="p-type" style="color:${bt.color};"><span class="type-dot" style="background:${bt.color};"></span>${escapeHtml(bt.name)}</div>` : ''}
         <div class="p-company">${escapeHtml(p.company)}${p.researchGrade ? `<span class="grade-badge">${escapeHtml(p.researchGrade)}</span>` : ''}${planned ? '<span class="plan-flag">TODAY</span>' : ''}</div>
-        <div class="p-meta">${p.state}${p.bdm ? ' · ' + escapeHtml(p.bdm) : ''}${p.contactName ? ' · ' + escapeHtml(p.contactName) : ''}</div>
-        ${nearDist.has(p.id) ? `<div class="near-line">${nearDist.get(p.id) < 10 ? nearDist.get(p.id).toFixed(1) : Math.round(nearDist.get(p.id))} km away${p.suburb ? ' \u00b7 ' + escapeHtml(p.suburb) : ''}<a href="${directionsUrl(p)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Directions</a></div>` : ''}
+        <div class="p-meta">${[p.suburb ? escapeHtml(p.suburb) : '', stateFilter === 'ALL' ? (p.state || '') : '', p.bdm && p.bdm !== currentBDM ? escapeHtml(p.bdm) : '', p.contactName ? escapeHtml(p.contactName) : ''].filter(Boolean).join(' · ')}</div>
+        ${nearDist.has(p.id) ? `<div class="near-line">${nearDist.get(p.id) < 10 ? nearDist.get(p.id).toFixed(1) : Math.round(nearDist.get(p.id))} km away<a href="${directionsUrl(p)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Directions</a></div>` : ''}
         <div class="p-followup ${followUpClass}">${followUpLabel}</div>
       </div>
-      <div class="p-status-badge">${p.status}</div>
+      ${p.status === 'New Lead' ? '' : `<div class="p-status-badge">${p.status}</div>`}
     </div>
     <div class="p-detail" id="detail-${p.id}">
       <div class="p-field-row">
@@ -2812,6 +2950,8 @@ function escapeHtml(s) {
 
 function render() {
   updateMissingAddressLink();
+  const cc = document.getElementById('connectCard');
+  if (cc) cc.style.display = trackerFileId ? 'none' : '';
   const visible = prospects.filter(p => {
     if (stateFilter !== 'ALL' && p.state !== stateFilter) return false;
     if (bdmFilter !== 'ALL' && p.bdm !== bdmFilter) return false;
@@ -2878,6 +3018,8 @@ function render() {
            list.map(cardHtml).join('');
   };
 
+  renderActiveFilters(viewMode === 'cold' ? cold.length : viewMode === 'today' ? todayList.length : active.length);
+
   const dash = document.getElementById('dashboard');
   nearDist = new Map();
   let nearHtml = null;
@@ -2903,7 +3045,7 @@ function render() {
     : (viewMode === 'today'
         ? "Nothing planned for today \u2014 swipe a card right, or open it and tap Add to today's plan."
         : viewMode === 'cold'
-        ? 'No cold leads \u2014 add one above, or import research.'
+        ? 'No cold leads \u2014 tap + to add one, or Research an area.'
         : 'Nothing in the pipeline yet \u2014 log a call, email or visit on a Cold lead to move it here.');
   dash.innerHTML = html || `<div class="empty-note">${emptyMsg}</div>`;
 
@@ -2917,6 +3059,7 @@ function render() {
 
 populateBdmDropdowns();
 populateStateDropdowns();
+updateBdmInitials();
 initSwipe();
 render();
 </script>
