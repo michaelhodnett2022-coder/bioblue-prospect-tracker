@@ -580,41 +580,10 @@ async function getOrCreateFolder(parentId, name) {
   catch (e) { delete _folderCache[key]; throw e; }
 }
 
-// LIVE: a brand-new live tracker file starts empty. The old TEST starter
-// list is kept only as an unused reference (it returns before reaching it).
+// No starter data: a new tracker file starts empty. (The old built-in
+// starter list was removed so no prospect names sit in the public code.)
 function getSeedProspects() {
   return [];
-  const today = todayStr();
-  const plus7 = addDays(today, 7);
-  return [
-    { id: uid(), company:'Varley Transport', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
-      bdm:'Michael Hodnett', status:'New Lead', activity:[], nextFollowUp:null, lostReason:null, createdDate:today, clientId:null },
-    { id: uid(), company:'Sands Refrigeration', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
-      bdm:'Michael Hodnett', status:'Quoted', activity:[
-        {date:today,type:'email',text:'Cold-call email sent'},
-        {date:today,type:'call',text:'Follow-up call made'},
-        {date:today,type:'note',text:'Quotes supplied, continue to follow-up'}
-      ], nextFollowUp:plus7, lostReason:null, createdDate:today, clientId:null },
-    { id: uid(), company:'Fenix', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
-      bdm:'Michael Hodnett', status:'Contacted', activity:[
-        {date:today,type:'email',text:'Cold-call email sent'},
-        {date:today,type:'note',text:'Need to follow-up with phone call'}
-      ], nextFollowUp:plus7, lostReason:null, createdDate:today, clientId:null },
-    { id: uid(), company:'McMan Bennett', state:'WA', contactName:'Michael McNeill', contactPhone:'', contactEmail:'',
-      bdm:'Michael Hodnett', status:'Engaged', activity:[
-        {date:today,type:'email',text:'Cold-call email sent'},
-        {date:today,type:'call',text:'Follow-up call made'},
-        {date:today,type:'note',text:'Follow-up with Michael McNeill on 17 August'}
-      ], nextFollowUp:'2026-08-17', lostReason:null, createdDate:today, clientId:null },
-    { id: uid(), company:'Flexi Trans', state:'WA', contactName:'Darren', contactPhone:'', contactEmail:'',
-      bdm:'Michael Hodnett', status:'Contacted', activity:[
-        {date:today,type:'email',text:'Cold-call email sent'},
-        {date:today,type:'call',text:'Left one message for Darren'},
-        {date:today,type:'note',text:'Follow-up again'}
-      ], nextFollowUp:plus7, lostReason:null, createdDate:today, clientId:null },
-    { id: uid(), company:'Swan Transit', state:'WA', contactName:'', contactPhone:'', contactEmail:'',
-      bdm:'Michael Hodnett', status:'New Lead', activity:[], nextFollowUp:null, lostReason:null, createdDate:today, clientId:null }
-  ];
 }
 
 // =====================================================================
