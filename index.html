@@ -333,6 +333,27 @@ body { background:#071a33 linear-gradient(170deg,#04142a 0%,#0a2a52 55%,#0d3a6e 
 .who-list button { font-family:'DM Sans',sans-serif;font-size:15px;font-weight:700;padding:14px;border-radius:12px;cursor:pointer;
   background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);color:white;text-align:left; }
 .who-list button:active { background:#64d2ff;color:#001f3f; }
+.tb-badge { position:absolute;top:-3px;right:-3px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#f87171;color:#2a0a0a;
+  font-size:10px;font-weight:800;line-height:17px;text-align:center;display:none; }
+.tb-badge.show { display:block; }
+.tb-badge.dot { min-width:10px;width:10px;height:10px;padding:0;top:0;right:0; }
+.td-item { padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.08); }
+.td-item:last-child { border-bottom:none; }
+.td-top { display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px; }
+.td-fit { font-size:9.5px;font-weight:800;letter-spacing:0.4px;text-transform:uppercase;padding:2px 7px;border-radius:8px;background:rgba(255,255,255,0.15); }
+.td-fit.direct { background:#4ADE80;color:#052e16; }
+.td-fit.possible { background:#64d2ff;color:#001f3f; }
+.td-new { font-size:9.5px;font-weight:800;color:#fbbf24; }
+.td-title { font-size:14.5px;font-weight:700;line-height:1.3; }
+.td-meta { font-size:11.5px;opacity:0.6;margin-top:2px; }
+.td-covers { font-size:12px;opacity:0.75;margin-top:4px;line-height:1.4; }
+.td-close { font-size:12px;font-weight:700;margin-top:5px;color:#a8d4f5; }
+.td-close.soon { color:#f87171; }
+.td-close.near { color:#fbbf24; }
+.td-actions { display:flex;gap:8px;margin-top:8px; }
+.td-actions a, .td-actions button { font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;padding:7px 12px;border-radius:9px;cursor:pointer;text-decoration:none;
+  border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:white; }
+.td-actions a { border-color:#64d2ff;color:#64d2ff; }
 .section-label { margin:18px 2px 8px; }
 .p-card { border-radius:16px;padding:12px 14px 12px 16px;margin-bottom:8px;background:rgba(255,255,255,0.065);border-color:rgba(255,255,255,0.09);transition:transform .15s; }
 .p-card::before { width:4px;background:var(--bar,var(--accent,#64d2ff)); }
@@ -383,6 +404,7 @@ body.sheet-open { overflow:hidden; }
   <a class="tb-back" href="https://michaelhodnett2022-coder.github.io/bioblue-field-tools" aria-label="Field Tools Hub">&#8249;</a>
   <div class="tb-brand"><div class="logo-dot"></div><div><div class="tb-kicker">BIOBLUE</div><div class="tb-title">Prospects</div></div></div>
   <label class="tb-bdm" title="Acting as"><span id="bdmInitials">MH</span><select id="actingAsBDM" onchange="setCurrentBDM(this.value)" aria-label="Acting as"></select></label>
+  <button class="tb-icon" onclick="openTenders()" title="Tenders" aria-label="Tenders">&#128276;<span class="tb-badge" id="tenderBadge"></span></button>
   <button class="tb-icon" onclick="loadTracker()" title="Load the latest from Drive" aria-label="Sync"><span class="sync-dot" id="saveStatusDot"></span>&#8635;</button>
   <button class="tb-icon" onclick="openSheet('toolsSheet')" title="Tools" aria-label="Tools">&#8943;</button>
 </header>
@@ -497,6 +519,14 @@ body.sheet-open { overflow:hidden; }
       </div>
       <button class="btn btn-primary sheet-done" style="margin-top:8px;" onclick="addNewLead()">Add to Cold</button>
     </div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="tenderSheet" onclick="if(event.target===this)closeSheet('tenderSheet')">
+  <div class="sheet">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h3>&#128276; Open tenders</h3><button class="link-btn" onclick="closeSheet('tenderSheet')">Done</button></div>
+    <div id="tenderList"></div>
   </div>
 </div>
 
@@ -1203,7 +1233,8 @@ async function fetchAndMergeProspects() {
   const driveIds = new Set(driveProspects.map(p => p.id));
   const localOnly = prospects.filter(p => !driveIds.has(p.id));
   prospects = [...localOnly, ...driveProspects];
-  setAuthStatus(`${prospects.length} prospect${prospects.length!==1?'s':''}`);
+  const leadCount = prospects.filter(p => p.status !== TENDER).length;
+  setAuthStatus(`${leadCount} prospect${leadCount!==1?'s':''}`);
   render();
 }
 
@@ -1365,9 +1396,7 @@ async function importResearchFile(input) {
   if (!file) return;
   try {
     const wb = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array' });
-    const sheetName = pickImportSheet(wb);
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
-    await importResearchRows(rows, `"${sheetName}"`);
+    await importWorkbook(wb, file.name);
   } catch (e) {
     alert('Import stopped — ' + e.message + '\n\nNothing was changed.');
   }
@@ -1492,15 +1521,14 @@ async function onResearchPicked(data) {
       : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
     const r = await fetch(url, { headers: { Authorization: `Bearer ${gdriveToken}` } });
     if (!r.ok) throw new Error(r.status === 401 ? 'your Google sign-in has expired — tap Load, then try again' : `could not read the file (${r.status})`);
-    let rows;
+    let done;
     if (mime === 'text/csv') {
-      rows = parseDelimited(await r.text());
+      const rows = parseDelimited(await r.text());
+      done = isTenderRows(rows) ? (await importTenders(rows)) > 0 : await importResearchRows(rows, `"${name}"`);
     } else {
       const wb = XLSX.read(new Uint8Array(await r.arrayBuffer()), { type: 'array' });
-      const sheetName = pickImportSheet(wb);
-      rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
+      done = await importWorkbook(wb, name);
     }
-    const done = await importResearchRows(rows, `"${name}"`);
     if (done) markResearchImported(fileId, name);
   } catch (e) {
     alert('Import from Drive stopped — ' + e.message + '\n\nNothing was changed.');
@@ -1566,6 +1594,11 @@ async function importPastedResearch() {
   if (!text.trim()) { showToast('Paste the sheet first'); return; }
   const rows = parseDelimited(text);
   if (!rows.length) { alert('Could not read that paste — make sure you copied the header row and at least one lead.'); return; }
+  if (isTenderRows(rows)) {
+    const n = await importTenders(rows);
+    if (n >= 0) closePasteResearch();
+    return;
+  }
   const headerKeys = Object.keys(rows[0]).map(normKey);
   if (!headerKeys.includes('company')) { alert('No "Company" column found — copy the whole Tracker Import sheet, including the header row.'); return; }
   try {
@@ -2025,6 +2058,166 @@ const DETAILS_SHEET = 'Details Update';
 const ADDRESS_RETRY_DAYS = 30;
 
 function safeUrl(u) { return /^https?:\/\//i.test(u || '') ? u : ''; }
+
+// =====================================================================
+// TENDERS — open tenders found by the Researcher ("National Tenders" tab)
+// or the Monday Tender Watch. Stored in the same Drive file as the leads,
+// with status 'Tender', so every BDM sees the same list. They never show
+// in Pipeline/Cold and never touch Client Records. The 🔔 badge counts
+// open tenders this phone hasn't seen yet; a dot means one closes within
+// 7 days.
+// =====================================================================
+const TENDER = 'Tender';
+const TENDER_COLS = {
+  title: ['title', 'tendertitle', 'tender', 'tendername', 'name'],
+  issuer: ['issuer', 'buyer', 'agency', 'organisation', 'organization', 'issuedby', 'client'],
+  ref: ['reference', 'referencenumber', 'ref', 'refno', 'tenderid', 'tendernumber', 'id'],
+  closing: ['closingdate', 'closes', 'closing', 'closedate', 'deadline', 'closingdatetime'],
+  covers: ['covers', 'whatitcovers', 'scope', 'summary', 'details', 'description'],
+  location: ['location', 'region', 'site', 'area'],
+  state: ['state'],
+  fit: ['fit'],
+  url: ['sourceurl', 'url', 'link', 'source', 'tenderurl']
+};
+function tcol(r, key) {
+  const want = TENDER_COLS[key];
+  const h = Object.keys(r).find(k => want.includes(normKey(k)));
+  return h === undefined ? '' : r[h];
+}
+function isTenderRows(rows) {
+  if (!rows || !rows.length) return false;
+  const keys = Object.keys(rows[0]).map(normKey);
+  return keys.some(k => TENDER_COLS.closing.includes(k)) && keys.some(k => TENDER_COLS.title.includes(k) || TENDER_COLS.issuer.includes(k)) && !keys.includes('company');
+}
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+function tenderDate(v) {
+  if (v === null || v === undefined || v === '') return '';
+  const pad = n => String(n).padStart(2, '0');
+  if (typeof v === 'number' && v > 20000 && v < 80000) {      // Excel serial date
+    const d = new Date(Math.round((v - 25569) * 86400000));
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  }
+  const t = String(v).trim();
+  let m = t.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  m = t.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/);            // Australian d/m/y
+  if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${pad(m[2])}-${pad(m[1])}`;
+  m = t.match(/(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{4})/);       // 5 Dec 2026
+  if (m && MONTHS[m[2].toLowerCase()]) return `${m[3]}-${pad(MONTHS[m[2].toLowerCase()])}-${pad(m[1])}`;
+  return '';
+}
+function tenderKey(t) { return normKey(t.ref) || normKey((t.tenderTitle || '') + (t.issuer || '')); }
+function openTenderList() {
+  const today = todayStr();
+  return prospects.filter(p => p.status === TENDER && !p.dismissed && (!p.closingDate || p.closingDate >= today))
+    .sort((a, b) => (a.closingDate || '9999').localeCompare(b.closingDate || '9999'));
+}
+function seenTenders() { try { return new Set(JSON.parse(localStorage.getItem('bb_tenders_seen') || '[]')); } catch (e) { return new Set(); } }
+
+async function importTenders(rows) {
+  const ok = await ensureConnected();
+  if (!ok) { showToast('⚠️ Could not connect to Drive — tenders not imported'); return -1; }
+  const today = todayStr();
+  const known = new Set(prospects.filter(p => p.status === TENDER).map(tenderKey));
+  const fresh = [];
+  rows.forEach(r => {
+    const t = {
+      tenderTitle: String(tcol(r, 'title') || '').trim(),
+      issuer: String(tcol(r, 'issuer') || '').trim(),
+      ref: String(tcol(r, 'ref') || '').trim(),
+      closingDate: tenderDate(tcol(r, 'closing')),
+      covers: String(tcol(r, 'covers') || '').trim(),
+      location: String(tcol(r, 'location') || '').trim(),
+      fit: String(tcol(r, 'fit') || '').trim(),
+      url: String(tcol(r, 'url') || '').trim()
+    };
+    if (!t.tenderTitle && !t.issuer) return;
+    if (t.closingDate && t.closingDate < today) return;               // already closed
+    const st = String(tcol(r, 'state') || '').trim().toUpperCase();
+    t.state = STATES.includes(st) ? st : (STATES.find(x => new RegExp('\\b' + x + '\\b').test(t.location + ' ' + t.issuer + ' ' + t.tenderTitle)) || (/federal|commonwealth|national/i.test(st + t.location) ? 'National' : ''));
+    const k = tenderKey(t);
+    if (!k || known.has(k)) return;
+    known.add(k);
+    fresh.push(Object.assign({ id: 'TD-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), status: TENDER, foundDate: today, foundBy: currentBDM }, t));
+  });
+  if (!fresh.length) { showToast('No new tenders in this file'); return 0; }
+  prospects = [...fresh, ...prospects];
+  const saved = await saveTracker();
+  if (!saved) { prospects = prospects.filter(p => !fresh.includes(p)); render(); showToast('⚠️ Tenders could not be saved — tap Load and try again'); return -1; }
+  render();
+  const soon = fresh.filter(t => t.closingDate && daysBetween(today, t.closingDate) <= 7).length;
+  showToast(`🔔 ${fresh.length} new tender${fresh.length !== 1 ? 's' : ''} found${soon ? ` — ${soon} closing within 7 days` : ''}. Tap the bell to see them.`);
+  return fresh.length;
+}
+
+// One file can carry leads and tenders: import the lead tab (if any), then any tender tab.
+async function importWorkbook(wb, label) {
+  const sheets = wb.SheetNames.map(n => ({ n, rows: XLSX.utils.sheet_to_json(wb.Sheets[n], { defval: '' }) }));
+  const tenderSheet = sheets.find(x => /tender/i.test(x.n) && isTenderRows(x.rows)) || sheets.find(x => isTenderRows(x.rows));
+  const hasLeadSheet = [IMPORT_SHEET, DETAILS_SHEET, ADDRESS_SHEET].some(n => wb.SheetNames.includes(n)) || !tenderSheet;
+  let leadsDone = false, tenders = 0;
+  if (hasLeadSheet) {
+    const sheetName = pickImportSheet(wb);
+    leadsDone = await importResearchRows(sheets.find(x => x.n === sheetName).rows, `"${label}"`);
+  }
+  if (tenderSheet) tenders = await importTenders(tenderSheet.rows);
+  return leadsDone || tenders > 0;
+}
+
+function updateTenderBadge() {
+  const b = document.getElementById('tenderBadge');
+  if (!b) return;
+  const open = openTenderList(), seen = seenTenders(), today = todayStr();
+  const unseen = open.filter(t => !seen.has(t.id)).length;
+  const urgent = open.some(t => t.closingDate && daysBetween(today, t.closingDate) <= 7);
+  b.textContent = unseen ? String(unseen) : '';
+  b.className = 'tb-badge' + (unseen || urgent ? ' show' : '') + (!unseen && urgent ? ' dot' : '');
+}
+
+let showDismissedTenders = false;
+function renderTenders() {
+  const wrap = document.getElementById('tenderList');
+  if (!wrap) return;
+  const today = todayStr(), seen = seenTenders();
+  const open = openTenderList();
+  const dismissed = prospects.filter(p => p.status === TENDER && p.dismissed && (!p.closingDate || p.closingDate >= today));
+  const item = (t, isDismissed) => {
+    const days = t.closingDate ? daysBetween(today, t.closingDate) : null;
+    const cls = days === null ? '' : days <= 7 ? 'soon' : days <= 14 ? 'near' : '';
+    const fitKey = /direct/i.test(t.fit) ? 'direct' : /possible/i.test(t.fit) ? 'possible' : '';
+    const meta = [t.issuer, t.state, t.ref ? 'Ref ' + t.ref : ''].filter(Boolean).map(escapeHtml).join(' · ');
+    return `<div class="td-item">
+      <div class="td-top">${t.fit ? `<span class="td-fit ${fitKey}">${escapeHtml(t.fit.split(/[\s(]/)[0])}</span>` : ''}${!isDismissed && !seen.has(t.id) ? '<span class="td-new">NEW</span>' : ''}</div>
+      <div class="td-title">${escapeHtml(t.tenderTitle || t.issuer)}</div>
+      ${meta ? `<div class="td-meta">${meta}</div>` : ''}
+      ${t.covers ? `<div class="td-covers">${escapeHtml(t.covers)}</div>` : ''}
+      <div class="td-close ${cls}">${t.closingDate ? `Closes ${fmtDate(t.closingDate)} — ${days === 0 ? 'today' : days === 1 ? '1 day left' : days + ' days left'}` : 'Closing date not given — check the notice'}</div>
+      <div class="td-actions">${safeUrl(t.url) ? `<a href="${escapeHtml(t.url)}" target="_blank" rel="noopener">Open notice &#8599;</a>` : ''}<button onclick="${isDismissed ? 'restoreTender' : 'dismissTender'}('${t.id}')">${isDismissed ? 'Restore' : 'Dismiss'}</button></div>
+    </div>`;
+  };
+  wrap.innerHTML = (open.length ? open.map(t => item(t, false)).join('')
+      : '<div class="empty-note" style="padding:10px 0;">No open tenders yet. They arrive when you Import a Research Inbox or the Monday Tender Watch sheet.</div>') +
+    (dismissed.length ? `<div style="margin-top:14px;"><button class="link-btn" onclick="showDismissedTenders=!showDismissedTenders;renderTenders();">${showDismissedTenders ? 'Hide' : 'Show'} dismissed (${dismissed.length})</button></div>` +
+      (showDismissedTenders ? dismissed.map(t => item(t, true)).join('') : '') : '');
+}
+function openTenders() {
+  renderTenders();                 // render first so NEW markers show this time...
+  openSheet('tenderSheet');
+  try {                            // ...then remember them as seen on this phone
+    const seen = seenTenders();
+    openTenderList().forEach(t => seen.add(t.id));
+    localStorage.setItem('bb_tenders_seen', JSON.stringify([...seen]));
+  } catch (e) {}
+  updateTenderBadge();
+}
+function dismissTender(id) {
+  const t = findProspect(id); if (!t) return;
+  t.dismissed = true; saveTracker(); renderTenders(); updateTenderBadge();
+}
+function restoreTender(id) {
+  const t = findProspect(id); if (!t) return;
+  delete t.dismissed; saveTracker(); renderTenders(); updateTenderBadge();
+}
 
 function pickImportSheet(wb) {
   if (wb.SheetNames.includes(IMPORT_SHEET)) return IMPORT_SHEET;
@@ -2995,6 +3188,7 @@ function escapeHtml(s) {
 
 function render() {
   updateMissingAddressLink();
+  updateTenderBadge();
   const cc = document.getElementById('connectCard');
   if (cc) cc.style.display = trackerFileId ? 'none' : '';
   const visible = prospects.filter(p => {
