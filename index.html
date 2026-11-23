@@ -315,6 +315,19 @@ body { background:#071a33 linear-gradient(170deg,#04142a 0%,#0a2a52 55%,#0d3a6e 
 .a-chip { flex:none;display:inline-flex;align-items:center;gap:5px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;padding:7px 10px;
   border-radius:20px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.08);color:white;cursor:pointer;white-space:nowrap; }
 .a-chip .x { opacity:0.55;font-size:11px; }
+.state-chips { display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-bottom:10px;padding-bottom:2px; }
+.state-chips::-webkit-scrollbar { display:none; }
+.st-chip { flex:none;display:inline-flex;align-items:center;gap:5px;font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:7px 11px;border-radius:20px;
+  border:1px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.75);cursor:pointer; }
+.st-chip .tick { width:15px;height:15px;border-radius:4px;border:1.5px solid rgba(255,255,255,0.45);display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1; }
+.st-chip.on { background:rgba(100,210,255,0.16);border-color:#64d2ff;color:white; }
+.st-chip.on .tick { background:#64d2ff;border-color:#64d2ff;color:#001f3f; }
+.st-chip .n { font-weight:500;opacity:0.55; }
+.bdm-seg { flex:none;display:inline-flex;padding:3px;border-radius:20px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.14); }
+.bdm-seg button { font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:5px 12px;border-radius:16px;border:none;background:transparent;color:rgba(255,255,255,0.7);cursor:pointer;white-space:nowrap; }
+.bdm-seg button.on { background:#64d2ff;color:#001f3f; }
+.bdm-seg button .x { margin-left:5px;opacity:0.6;font-size:11px; }
+.st-chip:not(.on):has(.n[data-z]) { opacity:0.45; }
 .section-label { margin:18px 2px 8px; }
 .p-card { border-radius:16px;padding:12px 14px 12px 16px;margin-bottom:8px;background:rgba(255,255,255,0.065);border-color:rgba(255,255,255,0.09);transition:transform .15s; }
 .p-card::before { width:4px;background:var(--bar,var(--accent,#64d2ff)); }
@@ -404,7 +417,10 @@ body.sheet-open { overflow:hidden; }
   <div class="near-info" id="nearInfo"></div>
 </div>
 
+<div class="state-chips" id="stateChips"></div>
+
 <div class="filter-row">
+  <div class="bdm-seg" id="bdmSeg"></div>
   <button class="filter-btn" id="filterBtn" onclick="openSheet('filterSheet')">&#9881; Filters</button>
   <div class="active-chips" id="activeChips"></div>
 </div>
@@ -436,9 +452,8 @@ body.sheet-open { overflow:hidden; }
   <div class="sheet">
     <div class="sheet-grip"></div>
     <div class="sheet-head"><h3>Filters</h3><button class="link-btn" onclick="clearAllFilters()">Reset</button></div>
-    <div class="sheet-label">State &amp; BDM</div>
+    <div class="sheet-label">BDM</div>
     <div class="sheet-row">
-      <select id="stateFilterSelect" onchange="setStateFilter(this.value)"><option value="ALL">All states</option></select>
       <select id="bdmFilterSelect" onchange="setBdmFilter(this.value)"><option value="ALL">All BDMs</option></select>
     </div>
     <div class="sheet-label">Business type</div>
@@ -609,7 +624,9 @@ const STATES = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA'];
 let gdriveToken = null;
 let trackerFileId = null;
 let prospects = [];
-let stateFilter = 'ALL';
+// States ticked on the main screen (empty = all states). Remembered on this device.
+let stateFilter = new Set((() => { try { return JSON.parse(localStorage.getItem('bb_tracker_states') || '[]'); } catch (e) { return []; } })().filter(st => STATES.includes(st)));
+function stateOk(p) { return !stateFilter.size || stateFilter.has(p.state); }
 let bdmFilter = 'ALL';
 let stageFilter = 'ALL';
 // Pipeline = leads in motion (Contacted onward). Cold = New Leads never contacted yet.
@@ -2590,9 +2607,21 @@ function promoteToClient(id) {
 // =====================================================================
 // RENDER
 // =====================================================================
-function setStateFilter(s) {
-  stateFilter = s;
+// Tick boxes: tap a state to add/remove it; "All" clears the ticks.
+function toggleStateFilter(st) {
+  if (st === 'ALL') stateFilter.clear();
+  else stateFilter.has(st) ? stateFilter.delete(st) : stateFilter.add(st);
+  try { localStorage.setItem('bb_tracker_states', JSON.stringify([...stateFilter])); } catch (e) {}
   render();
+}
+function renderStateChips(counts) {
+  const wrap = document.getElementById('stateChips');
+  if (!wrap) return;
+  const chip = (key, label, on, n) =>
+    `<button class="st-chip${on ? ' on' : ''}" onclick="toggleStateFilter('${key}')"><span class="tick">${on ? '&#10003;' : ''}</span>${label}${n !== undefined ? ` <span class="n"${n ? '' : ' data-z'}>${n}</span>` : ''}</button>`;
+  // States with leads first (busiest first), so your own states sit on screen; empty ones trail behind, dimmed.
+  const order = STATES.slice().sort((a, b) => (counts[b] || 0) - (counts[a] || 0) || a.localeCompare(b));
+  wrap.innerHTML = chip('ALL', 'All', !stateFilter.size) + order.map(st => chip(st, st, stateFilter.has(st), counts[st] || 0)).join('');
 }
 
 function setBdmFilter(name) {
@@ -2641,10 +2670,13 @@ function updateBdmInitials() {
 // all states, your own leads, every type, every stage.
 function renderActiveFilters(resultCount) {
   const chips = [];
-  if (stateFilter !== 'ALL') chips.push({ k: 'state', label: stateFilter });
-  if (bdmFilter !== currentBDM) chips.push({ k: 'bdm', label: bdmFilter === 'ALL' ? 'All BDMs' : bdmFilter });
   if (stageFilter !== 'ALL') chips.push({ k: 'stage', label: stageFilter });
   typeFilter.forEach(t => { const ti = typeInfo(t); chips.push({ k: 'type:' + t, label: t === '__none' ? 'No type yet' : t, color: ti ? ti.color : null }); });
+  // Mine / Team toggle. A single other BDM (picked in Filters) shows as their name with a ✕ back to Mine.
+  const seg = document.getElementById('bdmSeg');
+  if (seg) seg.innerHTML = (bdmFilter === currentBDM || bdmFilter === 'ALL')
+    ? `<button class="${bdmFilter === currentBDM ? 'on' : ''}" onclick="setBdmView('mine')">Mine</button><button class="${bdmFilter === 'ALL' ? 'on' : ''}" onclick="setBdmView('team')">Team</button>`
+    : `<button class="on" onclick="setBdmView('mine')">${escapeHtml(bdmFilter.split(' ')[0])}<span class="x">&#10005;</span></button>`;
   const wrap = document.getElementById('activeChips');
   if (wrap) wrap.innerHTML = chips.map(c =>
     `<button class="a-chip" data-k="${escapeHtml(c.k)}" onclick="clearFilter(this.dataset.k)">${c.color ? `<span class="type-dot" style="background:${c.color};"></span>` : ''}${escapeHtml(c.label)}<span class="x">&#10005;</span></button>`
@@ -2654,16 +2686,19 @@ function renderActiveFilters(resultCount) {
   const rc = document.getElementById('filterResultCount');
   if (rc) rc.textContent = resultCount;
 }
+function setBdmView(v) {
+  bdmFilter = v === 'team' ? 'ALL' : currentBDM;
+  const sel = document.getElementById('bdmFilterSelect');
+  if (sel) sel.value = bdmFilter;
+  render();
+}
 function clearFilter(k) {
-  if (k === 'state') { stateFilter = 'ALL'; document.getElementById('stateFilterSelect').value = 'ALL'; }
-  else if (k === 'bdm') { bdmFilter = currentBDM; document.getElementById('bdmFilterSelect').value = currentBDM; }
-  else if (k === 'stage') stageFilter = 'ALL';
+  if (k === 'stage') stageFilter = 'ALL';
   else if (k && k.startsWith('type:')) typeFilter.delete(k.slice(5));
   render();
 }
 function clearAllFilters() {
-  stateFilter = 'ALL'; bdmFilter = currentBDM; stageFilter = 'ALL'; typeFilter.clear();
-  document.getElementById('stateFilterSelect').value = 'ALL';
+  bdmFilter = currentBDM; stageFilter = 'ALL'; typeFilter.clear();
   document.getElementById('bdmFilterSelect').value = currentBDM;
   render();
 }
@@ -2681,9 +2716,7 @@ function populateBdmDropdowns() {
 
 function populateStateDropdowns() {
   const nl = document.getElementById('nlState');
-  const filterSelect = document.getElementById('stateFilterSelect');
   if (nl) nl.innerHTML = '<option value="">State...</option>' + STATES.map(st => `<option value="${st}">${st}</option>`).join('');
-  if (filterSelect) filterSelect.innerHTML = '<option value="ALL">All states</option>' + STATES.map(st => `<option value="${st}">${st}</option>`).join('');
 }
 
 function setSearchFilter(v) {
@@ -2741,7 +2774,7 @@ function cardHtml(p) {
       <div>
         ${bt ? `<div class="p-type" style="color:${bt.color};"><span class="type-dot" style="background:${bt.color};"></span>${escapeHtml(bt.name)}</div>` : ''}
         <div class="p-company">${escapeHtml(p.company)}${p.researchGrade ? `<span class="grade-badge">${escapeHtml(p.researchGrade)}</span>` : ''}${planned ? '<span class="plan-flag">TODAY</span>' : ''}</div>
-        <div class="p-meta">${[p.suburb ? escapeHtml(p.suburb) : '', stateFilter === 'ALL' ? (p.state || '') : '', p.bdm && p.bdm !== currentBDM ? escapeHtml(p.bdm) : '', p.contactName ? escapeHtml(p.contactName) : ''].filter(Boolean).join(' · ')}</div>
+        <div class="p-meta">${[p.suburb ? escapeHtml(p.suburb) : '', stateFilter.size !== 1 ? (p.state || '') : '', p.bdm && p.bdm !== currentBDM ? escapeHtml(p.bdm) : '', p.contactName ? escapeHtml(p.contactName) : ''].filter(Boolean).join(' · ')}</div>
         ${nearDist.has(p.id) ? `<div class="near-line">${nearDist.get(p.id) < 10 ? nearDist.get(p.id).toFixed(1) : Math.round(nearDist.get(p.id))} km away<a href="${directionsUrl(p)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Directions</a></div>` : ''}
         <div class="p-followup ${followUpClass}">${followUpLabel}</div>
       </div>
@@ -2953,7 +2986,7 @@ function render() {
   const cc = document.getElementById('connectCard');
   if (cc) cc.style.display = trackerFileId ? 'none' : '';
   const visible = prospects.filter(p => {
-    if (stateFilter !== 'ALL' && p.state !== stateFilter) return false;
+    if (!stateOk(p)) return false;
     if (bdmFilter !== 'ALL' && p.bdm !== bdmFilter) return false;
     if (stageFilter !== 'ALL' && p.status !== stageFilter) return false;
     if (typeFilter.size && !typeFilter.has(p.businessType || '__none')) return false;
@@ -2973,7 +3006,7 @@ function render() {
   // counts for every other stage, and there'd be no way to see them to
   // switch. Lost is excluded here too, it has its own section below.
   const forCounts = prospects.filter(p => {
-    if (stateFilter !== 'ALL' && p.state !== stateFilter) return false;
+    if (!stateOk(p)) return false;
     if (bdmFilter !== 'ALL' && p.bdm !== bdmFilter) return false;
     if (searchFilter) {
       const haystack = (p.company + ' ' + (p.contactName || '')).toLowerCase();
@@ -2984,6 +3017,13 @@ function render() {
   const stageCounts = {};
   PIPELINE_STATUSES.forEach(s => { stageCounts[s] = forCounts.filter(p => p.status === s).length; });
   renderStageStrip(stageCounts);
+  const stateCounts = {};
+  prospects.forEach(p => {
+    if (bdmFilter !== 'ALL' && p.bdm !== bdmFilter) return;
+    if (p.status !== 'New Lead' && !PIPELINE_STATUSES.includes(p.status)) return;
+    stateCounts[p.state] = (stateCounts[p.state] || 0) + 1;
+  });
+  renderStateChips(stateCounts);
 
   // Tab labels: counts follow State/BDM/search; Cold also shows its oldest lead's age.
   const coldAll = forCounts.filter(p => p.status === 'New Lead');
@@ -3039,7 +3079,7 @@ function render() {
     ? section(`Cold \u2014 not yet contacted, ${COLD_SORT_LABELS[coldSort]}`,'cold',cold)
     : section('Overdue','overdue',overdue) + section('Due today','today',today) +
       section('Upcoming','upcoming',upcoming) + section('No follow-up set','nodate',nodate);
-  const filterActive = stateFilter !== 'ALL' || bdmFilter !== 'ALL' || stageFilter !== 'ALL' || !!searchFilter || typeFilter.size > 0;
+  const filterActive = stateFilter.size > 0 || bdmFilter !== 'ALL' || stageFilter !== 'ALL' || !!searchFilter || typeFilter.size > 0;
   const emptyMsg = filterActive
     ? `No prospects match ${searchFilter ? `"${searchFilter}"` : 'that filter'} — try clearing the search or switching filters.`
     : (viewMode === 'today'
@@ -3047,7 +3087,7 @@ function render() {
         : viewMode === 'cold'
         ? 'No cold leads \u2014 tap + to add one, or Research an area.'
         : 'Nothing in the pipeline yet \u2014 log a call, email or visit on a Cold lead to move it here.');
-  dash.innerHTML = html || `<div class="empty-note">${emptyMsg}</div>`;
+  dash.innerHTML = html || `<div class="empty-note">${trackerFileId ? emptyMsg : 'Tap Load to bring in your prospects.'}</div>`;
 
   document.getElementById('lostToggle').style.display = viewMode !== 'pipeline' ? 'none' : '';
   if (viewMode !== 'pipeline') document.getElementById('lostWrap').classList.remove('open');
