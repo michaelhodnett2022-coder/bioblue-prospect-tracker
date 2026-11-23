@@ -354,6 +354,17 @@ body { background:#071a33 linear-gradient(170deg,#04142a 0%,#0a2a52 55%,#0d3a6e 
 .td-actions a, .td-actions button { font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;padding:7px 12px;border-radius:9px;cursor:pointer;text-decoration:none;
   border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:white; }
 .td-actions a { border-color:#64d2ff;color:#64d2ff; }
+.route-card { background:rgba(100,210,255,0.08);border:1px solid rgba(100,210,255,0.3);border-radius:16px;padding:12px;margin:14px 0 4px; }
+.route-row { display:flex;gap:8px; }
+.route-row select { flex:1;min-width:0;padding:0 10px;height:42px;border-radius:12px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.07);color:white;font-family:'DM Sans',sans-serif;font-size:14px; }
+.route-row select option { background:#003466;color:white; }
+.route-btn { flex:none;height:42px;padding:0 16px;border-radius:12px;border:none;background:#64d2ff;color:#001f3f;font-family:'DM Sans',sans-serif;font-size:13.5px;font-weight:800;cursor:pointer; }
+.route-legs { display:flex;flex-direction:column;gap:6px;margin-top:10px; }
+.route-legs a { display:block;text-align:center;padding:11px;border-radius:12px;background:#4ADE80;color:#052e16;font-weight:800;font-size:13.5px;text-decoration:none; }
+.route-note { font-size:11.5px;opacity:0.65;margin-top:8px;line-height:1.45; }
+.stop-no { display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#64d2ff;color:#001f3f;font-size:12px;font-weight:800;margin-right:7px;vertical-align:2px; }
+.leg-line { font-size:11.5px;font-weight:700;color:#a8d4f5;margin-top:5px; }
+.geo-warn { font-size:11px;font-weight:700;color:#fbbf24;margin:1px 0 2px; }
 .section-label { margin:18px 2px 8px; }
 .p-card { border-radius:16px;padding:12px 14px 12px 16px;margin-bottom:8px;background:rgba(255,255,255,0.065);border-color:rgba(255,255,255,0.09);transition:transform .15s; }
 .p-card::before { width:4px;background:var(--bar,var(--accent,#64d2ff)); }
@@ -538,6 +549,7 @@ body.sheet-open { overflow:hidden; }
     <button class="menu-item" onclick="toolAction(openResearchModal)"><span class="mi-ico">&#128269;</span><span>Research an area<small>Claude finds new prospects and saves them to Drive</small></span></button>
     <button class="menu-item" onclick="toolAction(importFromDrive)"><span class="mi-ico">&#9729;&#65039;</span><span>Import from Drive<small>Bring in a Research Inbox sheet</small></span></button>
     <button class="menu-item" onclick="toolAction(openAddressModal)"><span class="mi-ico">&#129513;</span><span id="toolsMissing">Fill missing details<small>Addresses and business types</small></span></button>
+    <button class="menu-item" onclick="toolAction(clearColdList)"><span class="mi-ico">&#129529;</span><span>Clear my Cold list<small>Start fresh: deletes untouched Cold leads so research can find them again</small></span></button>
     <div class="menu-group">Backup import</div>
     <button class="menu-item" onclick="toolAction(openPasteResearch)"><span class="mi-ico">&#128203;</span><span>Paste research<small>If Import from Drive won't open</small></span></button>
     <button class="menu-item" onclick="toolAction(()=>document.getElementById('researchFileInput').click())"><span class="mi-ico">&#8679;</span><span>Import research file<small>An .xlsx or .csv saved on this device</small></span></button>
@@ -1248,6 +1260,7 @@ async function loadTracker() {
   try {
     await fetchAndMergeProspects();
     setSaveStatus('saved', 'Connected \u2014 edits save automatically');
+    if (clientNamesCache.date !== todayStr()) loadClientNames().catch(() => {});
   } catch (e) {
     setAuthStatus('\u274C ' + e.message);
     setSaveStatus('error', 'Not connected \u2014 tap Load to retry');
@@ -1432,12 +1445,17 @@ async function importResearchRows(rows, sourceLabel) {
       return false;
     }
     const noState = kept.filter(p => !p.state).length;
+    const cov = (f) => kept.filter(f).length;
+    const coverage = kept.length
+      ? `\nOf the ${kept.length} to import: ${cov(p => p.streetAddress)} have a street address, ${cov(p => p.contactPhone || p.kdmPhone)} a phone, ${cov(p => p.kdmName || p.contactName)} a named contact.\n`
+      : '';
     const msg =
       `From ${sourceLabel}, assigned to ${currentBDM}:\n\n` +
       `• Import as Cold leads (Y): ${kept.length}\n` +
       `• Not imported, kept out of future research (N): ${thrown.length}\n` +
       (skipped.length ? `• Skipped, already known: ${skipped.length}\n   ${skipped.slice(0, 6).join('\n   ')}${skipped.length > 6 ? `\n   ...and ${skipped.length - 6} more` : ''}\n` : '') +
       (noName ? `• Ignored, no company name: ${noName}\n` : '') +
+      coverage +
       (noState ? `\n${noState} kept lead(s) have no valid state — set it on the card.\n` : '') +
       (!hasImportCol ? `\nNo IMPORT column found — every row will be imported.\n` : '') +
       `\nGo ahead?`;
@@ -1633,6 +1651,7 @@ let nearMode = false;
 let nearRadiusKm = 20;
 let myPos = null;            // { lat, lng, at } — memory only
 let nearDist = new Map();    // lead id -> km, for the current render only
+let routeStops = new Map();  // lead id -> { n, km } when today's route is current
 let _mapsPromise = null;
 
 function geoAddress(p) {
@@ -1677,6 +1696,9 @@ async function geocodeMissing(list, onProgress) {
     if (r.status === 'OK' && r.results && r.results[0]) {
       const loc = r.results[0].geometry.location;
       p.lat = loc.lat(); p.lng = loc.lng(); p.geoAddr = address; delete p.geoFailed;
+      // Street given but Google only matched the suburb/area: flag it for a check.
+      const lt = r.results[0].geometry.location_type;
+      if (p.streetAddress && lt && lt !== 'ROOFTOP' && lt !== 'RANGE_INTERPOLATED') p.geoApprox = true; else delete p.geoApprox;
       changed++;
     } else if (r.status === 'ZERO_RESULTS') {
       p.geoFailed = address; changed++;   // remembered so it isn't retried until the address changes
@@ -1817,6 +1839,31 @@ function directionsUrl(p) {
 // =====================================================================
 const RESEARCH_MAX_CHARS = 13000;
 
+// Existing BioBlue clients from Client Records, so research never brings one back.
+// Loaded in the background after Load (and when Research opens), cached for the day.
+let clientNamesCache = (() => { try { return JSON.parse(localStorage.getItem('bb_client_names') || '{}'); } catch (e) { return {}; } })();
+async function loadClientNames() {
+  if (!gdriveToken || clientNamesCache.loading) return;
+  clientNamesCache.loading = true;
+  try {
+    const rootId = await getDriveRootId();
+    const sheetId = await getOrCreateAdminSheetId(rootId);
+    const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+    if (!dl.ok) throw new Error('Client Records ' + dl.status);
+    const wb = XLSX.read(new Uint8Array(await dl.arrayBuffer()), { type: 'array' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets['Client Records'] || wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    const seen = new Map();
+    rows.forEach(r => {
+      const nm = String(r['Billing Entity'] || r['Site Name'] || '').trim();
+      if (nm && !seen.has(normKey(nm))) seen.set(normKey(nm), nm);
+    });
+    clientNamesCache = { date: todayStr(), names: [...seen.values()].sort((a, b) => a.localeCompare(b)) };
+    try { localStorage.setItem('bb_client_names', JSON.stringify(clientNamesCache)); } catch (e) {}
+  } finally {
+    delete clientNamesCache.loading;
+  }
+}
+
 function buildResearchRequest(area, focus) {
   const date = todayStr();
   const title = `${RESEARCH_PREFIX} - ${area} - ${date}`;
@@ -1824,17 +1871,22 @@ function buildResearchRequest(area, focus) {
 `You are the BioBlue Researcher. BioBlue Australia is an Australian-owned AdBlue® (AUS32) manufacturer and distributor. Request from ${currentBDM}, ${date}, sent from the BioBlue Prospect Tracker.
 
 TASK: find every qualified AdBlue® prospect in: ${area}${focus ? `\nFocus: ${focus}` : ''}
-Targets: diesel-fleet operators that use or will need AdBlue®: transport and haulage, bus and passenger transport, mining and drilling, civil and earthmoving, quarries, fuel resellers, gensets and plant hire.
-For each: what fleet runs from which site, likely volume, current supplier if public, and the named decision maker (fleet, operations, procurement or workshop manager). Grade A = named decision maker + clear fleet + street address; B = good fit, no decision maker yet; C = possible fit, needs a call. Cover the area fully, but leave out anything you can't source. Public sources only, with a source URL for every contact and claim. Never invent a person, phone number or email. If a bioblue-regional-prospecting skill is available, use it.
+Targets: diesel-fleet operators that use or will need AdBlue®: transport and haulage, bus and passenger transport, mining and drilling, civil and earthmoving, quarries, fuel resellers, waste, gensets and plant hire.
+For each: what fleet runs from which site, likely volume, current supplier if public, and the named decision maker (fleet, operations, procurement or workshop manager). Grade A = street address + phone + named decision maker, and clearly runs diesel vehicles; B = address or phone found, decision maker or fleet detail missing; C = possible fit, needs a call or visit. Public sources only, with a source URL for every contact and claim. Never invent a person, address, phone number or email. If a bioblue-regional-prospecting skill is available, use it.
 
-STREET ADDRESS FOR EVERY LEAD (the Tracker puts leads on a map, so this matters)
-Search in this order and stop when you have the site's street address:
-1. The company's own website: open the Contact, About, Locations / Depots / Branches pages and the page footer; also check Terms, Privacy and credit-application pages, which often carry the registered address.
-2. The Google Maps / Google Business listing for the company in that area.
-3. Directories: Yellow Pages, True Local, Hotfrog, iseekplant, Cylex, StartLocal, the local chamber of commerce member list.
-4. The company's LinkedIn page, Facebook "About" section, and industry association member lists.
-5. Public records: council development approvals, environmental licences, tender award notices, job ads (often name the depot).
-Rules: give the depot or yard in the searched area where the fleet is based, not a head office elsewhere (if only the head office can be found, use it and say "head office, local depot not found" in Why). No PO Boxes in Street Address. ABN Lookup shows only state and postcode, so use it to confirm, not as the address. Put the page the address came from in the Address Source URL column. Grade A needs a street address; if every step fails, grade B at most and say "address not found (website, Maps, directories checked)" in Why. End the chat summary with "Street addresses found: X of Y".
+DEPTH BEFORE BREADTH: 20 fully researched leads beat 60 bare names. Dig into every lead before adding more. If the area is too big to do properly, say so and suggest how to split it.
+
+DON'T BE TOO PARTICULAR: many yards full of trucks have no website or photos. If the business type suggests diesel vehicles, KEEP IT. Fleet evidence (trucks on website or socials, driver or diesel-fitter job ads, heavy-vehicle accreditation, equipment lists, yard photos, news) raises the grade; none found just means Why says "fleet not confirmed online, check on visit". Check ABN Lookup and leave a business out ONLY if its ABN is cancelled.
+
+FIND THE STREET ADDRESS AND PHONE FOR EVERY LEAD (the Tracker maps and routes leads)
+For EACH lead, stop when you have the site's street address AND a phone:
+1. Search first, like a person would: "[company] [suburb or area]" and "[company] address phone". Yellow Pages, True Local, Hotfrog, Google Business, iseekplant, Cylex, StartLocal, Facebook and chamber listings usually show the address and phone in the results.
+2. Open the best directory listing (Yellow Pages, True Local first) and take the street address and phone.
+3. The company website if it has one: Contact, About, Locations/Depots, footer, Terms, Privacy, credit-application pages.
+4. LinkedIn, Facebook "About", industry association member lists.
+5. Public records: council development approvals, environmental licences, tender awards, job ads.
+6. SECOND SWEEP before finishing: for every lead still missing an address or phone, try fresh searches (other spellings, with/without "Pty Ltd", owners' names, ABN trading names, "[company] [postcode]", "[company] trucks", "[company] depot").
+Rules: a directory or Google Business search result that shows a FULL street address counts even if the page won't open (use that link as Address Source URL). Put the listed phone in Contact Phone. Give the depot or yard in the searched area, not a head office elsewhere (if only the head office is found, use it and say so in Why). No PO Boxes. ABN Lookup shows only state and postcode: confirm with it, never use it as the address. A lead with NEITHER street address NOR phone after the second sweep stays OUT of the import sheet: list it under "NEEDS DETAILS" in the chat with what you tried.
 
 ALSO, EVERY TIME: NATIONAL SIGNALS AND TENDERS (its own section)
 - Trade news, Australia-wide, last 12 months (Big Rigs, ATN / Prime Mover, Owner//Driver, Trailer Magazine, bus and coach press, Australian Mining, Mining Weekly, quarry and construction press, local news): fleet purchases, contracts won, new depots or sites, mine and project starts, acquisitions, Euro 5/6 upgrades. Each: date, company, what happened, why it matters for AdBlue®, URL.
@@ -1842,39 +1894,62 @@ ALSO, EVERY TIME: NATIONAL SIGNALS AND TENDERS (its own section)
 - Mark items inside the searched area as LOCAL.
 
 OUTPUT
-1. In the chat: each lead as a short card (company, address, site type, fleet, decision maker, grade, why, source), A grades first. Then the national section.
+1. In the chat: each lead as a short card (company, address, phone, site type, fleet, decision maker, grade, why, source), A grades first. Then NEEDS DETAILS. Then the national section. Then a SCORECARD line: "Leads: Y | Street addresses: X of Y | Phones: X of Y | Decision makers: X of Y | Needs details: N".
 2. The Tracker Import list saved to my Google Drive as a Google Sheet: use the Google Drive connector to create it from CSV content (so it converts to a Google Sheet) inside a folder named "BioBlue Research Inbox" (create the folder if missing), titled exactly "${title}". If the Google Drive connector isn't available, say so and give me an Excel file with a tab named "Tracker Import" instead.
    Columns in this order, header row first:
    IMPORT | Company | Business Type | State | Street Address | Suburb | Postcode | Descriptor | Product Interest | Current Supplier | Est Volume Litres | Volume Period | Contact Name | Contact Role | Contact Phone | Contact Email | KDM Name | KDM Role | KDM Phone | KDM Email | Grade | Why | Source URL | Address Source URL
-   Rules: one row per qualified lead. IMPORT = Y on every row. Business Type: exactly one of Transport & Haulage, Fuel Distribution, Mining & Drilling, Bus & Coach, Civil, Quarry & Construction, or Council, Waste & Other. State: ACT, NSW, NT, QLD, SA, TAS, VIC or WA. Descriptor: Depot, Mine, Office, Other, Outside Payment Terminal (Unmanned), Port, Reseller Customer Site, Service Station, Site, Store, Terminal, Warehouse, Workshop or Yard. Est Volume Litres = a number only. Volume Period = "per month" or "per annum". KDM = key decision maker. Give the real street address and suburb wherever it can be sourced (the Tracker uses them to put leads on the map). Unknown = leave blank, never "not found".
-3. Finish with the Drive link and: "Mark any N, then tap Import from Drive in the Prospect Tracker."
+   Rules: one row per qualified lead that has a street address or a phone. IMPORT = Y on every row. Business Type: exactly one of Transport & Haulage, Fuel Distribution, Mining & Drilling, Bus & Coach, Civil, Quarry & Construction, or Council, Waste & Other. State: ACT, NSW, NT, QLD, SA, TAS, VIC or WA. Descriptor: Depot, Mine, Office, Other, Outside Payment Terminal (Unmanned), Port, Reseller Customer Site, Service Station, Site, Store, Terminal, Warehouse, Workshop or Yard. Est Volume Litres = a number only. Volume Period = "per month" or "per annum". KDM = key decision maker. Give the real street address and suburb wherever it can be sourced (the Tracker uses them to put leads on the map). Unknown = leave blank, never "not found".
+3. If the national sweep found open tenders, save them as a second Google Sheet in the same folder titled "${RESEARCH_PREFIX} - ${area} Tenders - ${date}", header row: Title | Issuer | Reference | Closing Date | Covers | Location | State | Fit | Source URL (Closing Date as YYYY-MM-DD).
+4. Finish with the Drive link(s) and: "Mark any N, then tap Import from Drive in the Prospect Tracker."
 
 RULES: Australian English. Always AdBlue® with the ®. Don't present ISO/VDA certification or local WA manufacture as differentiators. Never quote prices.
 
 EXCLUDE these companies (already in the BioBlue Prospect Tracker or previously rejected):
 `;
-  const names = [...new Set(prospects.filter(p => p.company)
+  const names = [...new Set(prospects.filter(p => p.company && p.status !== TENDER)
     .map(p => `${p.company}${p.suburb ? ', ' + p.suburb : ''}${p.state ? ' ' + p.state : ''}`))]
     .sort((a, b) => a.localeCompare(b));
-  let list = '', included = 0;
+  // Existing BioBlue clients (Client Records), compact, after the Tracker list.
+  const trackerKeys = new Set(prospects.map(p => normKey(p.company)));
+  const clients = (clientNamesCache.names || []).filter(n => !trackerKeys.has(normKey(n)));
+  const clientHead = '\nALSO EXCLUDE these existing BioBlue clients (from Client Records):\n';
+  let list = '', included = 0, budget = RESEARCH_MAX_CHARS - head.length - 220;
+  const clientText = clients.length ? clientHead + clients.join('; ') + '\n' : '';
+  // Clients get up to a third of the room; the Tracker list gets the rest.
+  const clientRoom = Math.min(clientText.length, Math.floor(budget / 3));
   for (const n of names) {
-    if (head.length + list.length + n.length + 80 > RESEARCH_MAX_CHARS) break;
+    if (list.length + n.length + 1 > budget - clientRoom) break;
     list += n + '\n'; included++;
   }
-  const shortened = included < names.length;
-  const tail = names.length
-    ? list + (shortened ? `(list shortened: ${names.length - included} more companies are in the Tracker; if you find one that looks familiar, flag it rather than leave it out)\n` : '')
-    : '(none yet)\n';
-  return { text: head + tail, total: names.length, included, shortened };
+  let clientPart = '', clientsIncluded = 0;
+  if (clients.length) {
+    clientPart = clientHead;
+    for (const n of clients) {
+      if (list.length + clientPart.length + n.length + 2 > budget) break;
+      clientPart += n + '; '; clientsIncluded++;
+    }
+    clientPart = clientPart.replace(/; $/, '') + '\n';
+  }
+  const shortened = included < names.length || clientsIncluded < clients.length;
+  const tail = (names.length ? list : '(none yet)\n') + clientPart +
+    (shortened ? `(lists shortened: ${names.length - included + clients.length - clientsIncluded} more names not shown; if a company looks like it may already be with BioBlue, flag it rather than leave it out)\n` : '');
+  return { text: head + tail, total: names.length, included, shortened, clients: clients.length, clientsIncluded };
 }
 
 function openResearchModal() {
   document.getElementById('researchArea').value = '';
   document.getElementById('researchFocus').value = '';
   const n = new Set(prospects.filter(p => p.company).map(p => normKey(p.company))).size;
-  document.getElementById('researchInfo').textContent = n
-    ? `${n} compan${n !== 1 ? 'ies' : 'y'} already in the Tracker will be excluded. Leads you import are assigned to ${currentBDM}.`
-    : `Tap Load first if you have leads in Drive, so they can be excluded.`;
+  const info = document.getElementById('researchInfo');
+  const showInfo = () => {
+    const c = (clientNamesCache.names || []).length;
+    info.textContent = !trackerFileId
+      ? 'Tap Load first, so Tracker leads and existing clients can be excluded.'
+      : `Excluded: ${n} compan${n !== 1 ? 'ies' : 'y'} in the Tracker` + (c ? ` and ${c} existing clients.` : clientNamesCache.loading ? ', loading existing clients...' : ' (existing clients could not be loaded).') +
+        ` Leads you import are assigned to ${currentBDM}.`;
+  };
+  showInfo();
+  if (trackerFileId && clientNamesCache.date !== todayStr()) loadClientNames().then(showInfo).catch(showInfo);
   document.getElementById('researchModal').classList.add('open');
 }
 function closeResearchModal() { document.getElementById('researchModal').classList.remove('open'); }
@@ -2219,6 +2294,38 @@ function restoreTender(id) {
   delete t.dismissed; saveTracker(); renderTenders(); updateTenderBadge();
 }
 
+// ---- Clear my Cold list: a true delete (not "Removed"), so a fresh research
+// run can bring the same companies back with better details. Only the current
+// BDM's leads; only Cold (New Lead) with no Client ID and nothing logged, plus
+// that BDM's earlier "Removed" leads with no Client ID. Pipeline, tenders,
+// "Thrown back" decisions and anything called/emailed/visited are kept.
+async function clearColdList() {
+  const ok = await ensureConnected();
+  if (!ok) { showToast('\u26A0\uFE0F Could not connect to Drive \u2014 tap Load first'); return; }
+  const mine = p => (p.bdm || '') === currentBDM;
+  // Auto notes written by imports don't count as being worked; calls, emails, visits and your own notes do.
+  const AUTO_NOTE = /^(Imported from research|Street address added from research|Marked N on research import)/;
+  const untouched = p => !p.clientId && p.planDate !== todayStr() &&
+    !(p.activity || []).some(a => a.type !== 'note' || !AUTO_NOTE.test(a.text || ''));
+  const cold = prospects.filter(p => mine(p) && p.status === 'New Lead' && untouched(p));
+  const keptCold = prospects.filter(p => mine(p) && p.status === 'New Lead' && !untouched(p)).length;
+  const removed = prospects.filter(p => mine(p) && p.status === REMOVED && !p.clientId);
+  if (!cold.length && !removed.length) { alert(`Nothing to clear \u2014 ${currentBDM} has no untouched Cold leads.`); return; }
+  const msg = `Clear ${currentBDM}'s Cold list?\n\n` +
+    `\u2022 Delete ${cold.length} untouched Cold lead${cold.length !== 1 ? 's' : ''}\n` +
+    (removed.length ? `\u2022 Forget ${removed.length} lead${removed.length !== 1 ? 's' : ''} removed earlier (so research can find them again)\n` : '') +
+    (keptCold ? `\u2022 Keep ${keptCold} Cold lead${keptCold !== 1 ? 's' : ''} you've already worked (call, email, visit, your own note, Client ID or today's plan)\n` : '') +
+    `\nPipeline leads, tenders and other BDMs' leads are not touched. This can't be undone.\n\nGo ahead?`;
+  if (!confirm(msg)) { showToast('Nothing cleared'); return; }
+  const gone = new Set([...cold, ...removed]);
+  const backup = prospects.slice();
+  prospects = prospects.filter(p => !gone.has(p));
+  const saved = await saveTracker();
+  if (!saved) { prospects = backup; render(); alert('Could not save to Drive, so nothing was cleared. Tap Load and try again.'); return; }
+  render();
+  showToast(`\uD83E\uDDF9 Cleared ${gone.size} lead${gone.size !== 1 ? 's' : ''}. Ready for fresh research.`);
+}
+
 function pickImportSheet(wb) {
   if (wb.SheetNames.includes(IMPORT_SHEET)) return IMPORT_SHEET;
   if (wb.SheetNames.includes(DETAILS_SHEET)) return DETAILS_SHEET;
@@ -2248,20 +2355,21 @@ TASK: fill in the missing details for each company listed below. They are prospe
 
 BUSINESS TYPE: exactly one of: Transport & Haulage | Fuel Distribution | Mining & Drilling | Bus & Coach | Civil, Quarry & Construction | Council, Waste & Other. Choose by what the company mainly does (check its website). Fill it for every company, even ones that only needed an address.
 
-HOW TO FIND EACH ADDRESS (in this order, stop when found)
-1. The company's own website: open the Contact, About, Locations / Depots / Branches pages and read the footer; also check Terms, Privacy and credit-application pages. Never rely on a search snippet alone.
-2. The Google Maps / Google Business listing for the company in that area.
-3. Directories: Yellow Pages, True Local, Hotfrog, iseekplant, Cylex, StartLocal, local chamber of commerce member lists.
-4. The company's LinkedIn page, Facebook "About" section, industry association member lists.
-5. Public records: council development approvals, environmental licences, tender award notices, job ads.
-Rules: the depot or yard in the suburb or area given, not a head office elsewhere (if only the head office can be found, give it and say so in Note). No PO Boxes. ABN Lookup shows only state and postcode, so use it to confirm, not as the address. Never guess: leave it blank if not found.
+HOW TO FIND EACH ADDRESS AND PHONE (stop when you have both)
+1. Search first, like a person would: "[company] [suburb or area]" and "[company] address phone". Yellow Pages, True Local, Hotfrog, Google Business, iseekplant, Cylex, StartLocal, Facebook and chamber listings usually show the address and phone in the results.
+2. Open the best directory listing (Yellow Pages, True Local first) and take the street address and phone.
+3. The company website if it has one: Contact, About, Locations/Depots, footer, Terms, Privacy, credit-application pages.
+4. LinkedIn, Facebook "About", industry association member lists.
+5. Public records: council development approvals, environmental licences, tender awards, job ads.
+6. Second try for any still missing: other spellings, with/without "Pty Ltd", owners' names, ABN trading names, "[company] [postcode]", "[company] trucks", "[company] depot".
+Rules: a directory or Google Business search result showing a FULL street address counts even if the page won't open (use that link as Address Source URL). The depot or yard in the suburb or area given, not a head office elsewhere (if only the head office can be found, give it and say so in Note). No PO Boxes. ABN Lookup shows only state and postcode, so use it to confirm, not as the address. Never guess: leave it blank if not found.
 
 OUTPUT
 1. Save the results to my Google Drive as a Google Sheet: use the Google Drive connector to create it from CSV content (so it converts to a Google Sheet) inside the folder "BioBlue Research Inbox" (create it if missing), titled exactly "${title}". If the Google Drive connector isn't available, say so and give me an Excel file with a tab named "Details Update" instead.
    Columns in this order, header row first:
-   Ref | Company | Business Type | Street Address | Suburb | State | Postcode | Address Source URL | Note
+   Ref | Company | Business Type | Street Address | Suburb | State | Postcode | Phone | Address Source URL | Note
    One row for EVERY company below, with its Ref copied exactly. Address not found = Street Address blank, and Note says what was checked. State: ACT, NSW, NT, QLD, SA, TAS, VIC or WA.
-2. In the chat: "Addresses found: X of Y" and "Types set: X of Y", then any not found.
+2. In the chat: "Addresses found: X of Y", "Phones found: X of Y" and "Types set: X of Y", then any not found.
 3. Finish with the Drive link and: "Tap Import from Drive in the Prospect Tracker and pick this sheet."
 
 COMPANIES (Ref | Company | needs | what the Tracker knows | website or source, if known)
@@ -2341,7 +2449,7 @@ async function importAddressUpdate(rows, sourceLabel) {
   const ok = await ensureConnected();
   if (!ok) throw new Error('Could not connect to Drive');
   const today = todayStr();
-  const updates = [], types = [], notFound = [], unmatched = [];
+  const updates = [], types = [], phones = [], notFound = [], unmatched = [];
   let alreadyAddr = 0;
   rows.forEach(r => {
     const byKey = {};
@@ -2354,6 +2462,9 @@ async function importAddressUpdate(rows, sourceLabel) {
     // Business type: only filled when the lead has none.
     const bt = typeFromText(byKey.businesstype);
     if (bt && !p.businessType) types.push({ p, bt });
+    // Phone: only filled when the lead has none.
+    const ph = byKey.phone || byKey.contactphone;
+    if (ph && !p.contactPhone) phones.push({ p, ph });
     // Street address: only filled when the lead has none.
     if (p.streetAddress) { if (byKey.streetaddress) alreadyAddr++; return; }
     const street = byKey.streetaddress;
@@ -2362,7 +2473,7 @@ async function importAddressUpdate(rows, sourceLabel) {
     updates.push({ p, street, suburb: byKey.suburb, postcode: byKey.postcode, state: STATES.includes(st) ? st : '', source: byKey.addresssourceurl, note: byKey.note });
   });
 
-  if (!updates.length && !types.length && !notFound.length) {
+  if (!updates.length && !types.length && !phones.length && !notFound.length) {
     alert(`Nothing to update from ${sourceLabel}.` + (alreadyAddr ? `\n\n${alreadyAddr} already had an address.` : '') + (unmatched.length ? `\n${unmatched.length} didn't match any lead.` : ''));
     return false;
   }
@@ -2371,15 +2482,17 @@ async function importAddressUpdate(rows, sourceLabel) {
     `• Street addresses to add: ${updates.length}\n` +
     (updates.length ? `   ${updates.slice(0, 5).map(u => `${u.p.company}: ${u.street}${u.suburb ? ', ' + u.suburb : ''}`).join('\n   ')}${updates.length > 5 ? `\n   ...and ${updates.length - 5} more` : ''}\n` : '') +
     `• Business types to set: ${types.length}\n` +
+    `• Phone numbers to add: ${phones.length}\n` +
     `• Addresses not found (skipped for ${ADDRESS_RETRY_DAYS} days): ${notFound.length}\n` +
     (alreadyAddr ? `• Already had an address (left as is): ${alreadyAddr}\n` : '') +
     (unmatched.length ? `• Didn't match any lead: ${unmatched.length}\n` : '') +
     `\nGo ahead?`;
   if (!confirm(msg)) { showToast('Update cancelled — nothing changed'); return false; }
 
-  const touched = new Set([...updates.map(u => u.p), ...types.map(t => t.p), ...notFound]);
+  const touched = new Set([...updates.map(u => u.p), ...types.map(t => t.p), ...phones.map(x => x.p), ...notFound]);
   const before = new Map([...touched].map(p => [p.id, JSON.stringify(p)]));
   types.forEach(t => { t.p.businessType = t.bt; });
+  phones.forEach(x => { x.p.contactPhone = x.ph; });
   updates.forEach(u => {
     const p = u.p;
     p.streetAddress = u.street;
@@ -2387,7 +2500,7 @@ async function importAddressUpdate(rows, sourceLabel) {
     if (u.suburb) p.suburb = u.suburb;
     if (u.postcode) p.postcode = u.postcode;
     if (u.state) p.state = u.state;
-    delete p.lat; delete p.lng; delete p.geoAddr; delete p.geoFailed;
+    delete p.lat; delete p.lng; delete p.geoAddr; delete p.geoFailed; delete p.geoApprox;
     p.activity.push({ date: today, type: 'note', text: `Street address added from research${u.source ? ' — ' + u.source : ''}${u.note ? ' (' + u.note + ')' : ''}` });
   });
   notFound.forEach(p => { p.addressSearchedDate = today; });
@@ -2724,7 +2837,7 @@ function updateField(id, field, value) {
   const p = findProspect(id);
   if (!p) return;
   p[field] = (value || '').trim();
-  if (ADDRESS_FIELDS.includes(field)) { delete p.lat; delete p.lng; delete p.geoAddr; delete p.geoFailed; }
+  if (ADDRESS_FIELDS.includes(field)) { delete p.lat; delete p.lng; delete p.geoAddr; delete p.geoFailed; delete p.geoApprox; }
   saveTracker();
   if (p.clientId && p.status !== 'Won' && CLIENT_RECORD_SYNCED_FIELDS.has(field)) queueClientRecordSync(p);
   const detail = document.getElementById('detail-' + id);
@@ -2813,6 +2926,135 @@ function promoteToClient(id) {
 // =====================================================================
 // RENDER
 // =====================================================================
+// =====================================================================
+// ROUTE MY DAY — orders today's plan into the shortest drive from a start
+// point (your location or a BioBlue depot), finishing at the last call,
+// using the map pins already saved on each lead (no extra Google cost).
+// Then opens Google Maps with the stops in order. Google only promises 3
+// in-between stops for links opened in a phone browser (9 on a computer),
+// so a longer run is split into legs. Order is saved via planAt.
+// =====================================================================
+const ROUTE_STARTS = [
+  { key: 'here', label: 'From my location' },
+  { key: 'BB-PER', label: 'From Perth depot (Maddington)', addr: '5 Baltic Court, Maddington WA 6109' },
+  { key: 'BB-DAR', label: 'From Darwin depot', addr: '10 McCourt Road, Yarrawonga NT' },
+  { key: 'BB-ADL', label: 'From Adelaide depot', addr: '180A Cavan Road, Dry Creek SA' },
+  { key: 'BB-MEL', label: 'From Melbourne depot', addr: '1/32 Judges Street, Sunshine VIC' },
+  { key: 'BB-SYD', label: 'From Sydney depot', addr: '3 Nursery Road, Campbelltown NSW' },
+  { key: 'BB-BNE', label: 'From Brisbane depot', addr: '4 Bronze Street, Sumner QLD' },
+  { key: 'BB-TSV', label: 'From Townsville depot', addr: '69 Perkin Street W, Railway Estate QLD' },
+  { key: 'BB-TAS', label: 'From Tasmania depot', addr: '8 River Rd, Wivenhoe TAS 7320' }
+];
+const ROAD_FACTOR = 1.3;          // straight line -> rough road distance
+const IS_PHONE = /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent);
+let routeStartKey = (() => { try { return localStorage.getItem('bb_route_start') || 'here'; } catch (e) { return 'here'; } })();
+let routeInfo = null;             // { date, by, origin:{lat,lng,label,addr?}, ids:[...] } — memory only
+
+function setRouteStart(k) {
+  routeStartKey = ROUTE_STARTS.some(r => r.key === k) ? k : 'here';
+  try { localStorage.setItem('bb_route_start', routeStartKey); } catch (e) {}
+}
+async function routeOrigin() {
+  const st = ROUTE_STARTS.find(r => r.key === routeStartKey) || ROUTE_STARTS[0];
+  if (st.key === 'here') { const pos = await getMyPosition(); return { lat: pos.lat, lng: pos.lng, label: 'your location' }; }
+  let cache = {};
+  try { cache = JSON.parse(localStorage.getItem('bb_depot_pins') || '{}'); } catch (e) {}
+  if (!cache[st.key]) {
+    await loadMaps();
+    const r = await geocodeOne(new google.maps.Geocoder(), st.addr + ', Australia');
+    if (r.status !== 'OK' || !r.results || !r.results[0]) throw new Error(r.status === 'REQUEST_DENIED' ? 'Google Maps is switched off for this app (check billing)' : 'could not find ' + st.addr);
+    const loc = r.results[0].geometry.location;
+    cache[st.key] = { lat: loc.lat(), lng: loc.lng() };
+    try { localStorage.setItem('bb_depot_pins', JSON.stringify(cache)); } catch (e) {}
+  }
+  return { lat: cache[st.key].lat, lng: cache[st.key].lng, label: st.label.replace(/^From /, '').replace(/ \(.*\)$/, ''), addr: st.addr };
+}
+// Shortest open path from the origin through every stop (nearest-neighbour, then 2-opt clean-up).
+function shortestOrder(origin, stops) {
+  const d = (a, b) => distanceKm(a.lat, a.lng, b.lat, b.lng);
+  const left = stops.slice(), path = [];
+  let cur = origin;
+  while (left.length) {
+    let bi = 0;
+    left.forEach((p, i) => { if (d(cur, p) < d(cur, left[bi])) bi = i; });
+    cur = left.splice(bi, 1)[0]; path.push(cur);
+  }
+  const len = arr => arr.reduce((sum, p, i) => sum + d(i ? arr[i - 1] : origin, p), 0);
+  let improved = true, guard = 0;
+  while (improved && guard++ < 50) {
+    improved = false;
+    for (let i = 0; i < path.length - 1; i++) {
+      for (let k = i + 1; k < path.length; k++) {
+        const cand = path.slice(0, i).concat(path.slice(i, k + 1).reverse(), path.slice(k + 1));
+        if (len(cand) + 1e-9 < len(path)) { path.splice(0, path.length, ...cand); improved = true; }
+      }
+    }
+  }
+  return path;
+}
+async function routeMyDay() {
+  const btn = document.getElementById('routeBtn');
+  const stops = prospects.filter(isPlannedToday);
+  if (!stops.length) { showToast("Nothing in today's plan yet"); return; }
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
+    const origin = await routeOrigin();
+    const changed = await geocodeMissing(stops);
+    if (changed) saveTracker();
+    const placed = stops.filter(hasCoords), unplaced = stops.filter(p => !hasCoords(p));
+    const ordered = shortestOrder(origin, placed).concat(unplaced);
+    const base = Date.now();
+    ordered.forEach((p, i) => { p.planAt = base + i; });
+    routeInfo = { date: todayStr(), by: currentBDM, origin, ids: ordered.filter(hasCoords).map(p => p.id) };
+    saveTracker();
+    render();
+    showToast(`🗺 Route ready — ${routeInfo.ids.length} stop${routeInfo.ids.length !== 1 ? 's' : ''} in order${unplaced.length ? `, ${unplaced.length} without an address left off` : ''}`);
+  } catch (e) {
+    showToast('⚠️ Route stopped — ' + e.message);
+    render();
+  }
+}
+function routeIsCurrent(todayList) {
+  if (!routeInfo || routeInfo.date !== todayStr() || routeInfo.by !== currentBDM) return false;
+  const ids = todayList.filter(hasCoords).map(p => p.id);
+  return ids.length === routeInfo.ids.length && ids.every((id, i) => id === routeInfo.ids[i]);
+}
+function routeStopAddr(p) { return p.geoAddr || `${p.lat},${p.lng}`; }
+function routeLegLinks(todayList) {
+  const stops = todayList.filter(hasCoords);
+  const perLink = (IS_PHONE ? 3 : 9) + 1;          // in-between stops + the leg's end
+  const legs = [];
+  for (let i = 0; i < stops.length; i += perLink) {
+    const chunk = stops.slice(i, i + perLink);
+    const params = new URLSearchParams({ api: '1', travelmode: 'driving' });
+    const from = i === 0 ? (routeInfo.origin.addr || null) : routeStopAddr(stops[i - 1]);
+    if (from) params.set('origin', from);               // no origin = Google uses your current location
+    params.set('destination', routeStopAddr(chunk[chunk.length - 1]));
+    if (chunk.length > 1) params.set('waypoints', chunk.slice(0, -1).map(routeStopAddr).join('|'));
+    legs.push({ from: i + 1, to: i + chunk.length, url: 'https://www.google.com/maps/dir/?' + params.toString() });
+  }
+  return legs;
+}
+function routeCardHtml(todayList) {
+  const opts = ROUTE_STARTS.map(r => `<option value="${r.key}" ${r.key === routeStartKey ? 'selected' : ''}>${escapeHtml(r.label)}</option>`).join('');
+  let legsHtml = '', note = 'Puts your calls in the shortest driving order and opens Google Maps, finishing at the last call.';
+  if (routeIsCurrent(todayList)) {
+    const legs = routeLegLinks(todayList);
+    const km = Math.round(routeInfo.ids.reduce((sum, id, i) => {
+      const p = findProspect(id), prev = i ? findProspect(routeInfo.ids[i - 1]) : routeInfo.origin;
+      return sum + distanceKm(prev.lat, prev.lng, p.lat, p.lng) * ROAD_FACTOR;
+    }, 0));
+    legsHtml = `<div class="route-legs">${legs.map(l => `<a href="${l.url}" target="_blank" rel="noopener">&#128663; ${legs.length > 1 ? `Leg ${legs.indexOf(l) + 1}: stops ${l.from}–${l.to}` : 'Open in Google Maps'}</a>`).join('')}</div>`;
+    const missing = todayList.length - routeInfo.ids.length;
+    note = `${routeInfo.ids.length} stops from ${escapeHtml(routeInfo.origin.label)}, about ${km} km of driving (estimate).` +
+      (legs.length > 1 ? ' Google Maps on a phone takes 4 stops per link, so open Leg 2 when you finish Leg 1.' : '') +
+      (missing ? ` ${missing} call${missing !== 1 ? 's have' : ' has'} no address, so ${missing !== 1 ? "they're" : "it's"} left off the map.` : '');
+  }
+  return `<div class="route-card">
+    <div class="route-row"><select onchange="setRouteStart(this.value)" aria-label="Start point">${opts}</select><button class="route-btn" id="routeBtn" onclick="routeMyDay()">&#128506; Route my day</button></div>
+    ${legsHtml}<div class="route-note">${note}</div></div>`;
+}
+
 // Tick boxes: tap a state to add/remove it; "All" clears the ticks.
 function toggleStateFilter(st) {
   if (st === 'ALL') stateFilter.clear();
@@ -2978,8 +3220,10 @@ function cardHtml(p) {
     <div class="p-card-top" onclick="toggleCard('${p.id}')">
       <div>
         ${bt ? `<div class="p-type" style="color:${bt.color};"><span class="type-dot" style="background:${bt.color};"></span>${escapeHtml(bt.name)}</div>` : ''}
-        <div class="p-company">${escapeHtml(p.company)}${p.researchGrade ? `<span class="grade-badge">${escapeHtml(p.researchGrade)}</span>` : ''}${planned ? '<span class="plan-flag">TODAY</span>' : ''}</div>
+        <div class="p-company">${routeStops.has(p.id) ? `<span class="stop-no">${routeStops.get(p.id).n}</span>` : ''}${escapeHtml(p.company)}${p.researchGrade ? `<span class="grade-badge">${escapeHtml(p.researchGrade)}</span>` : ''}${planned && viewMode !== 'today' ? '<span class="plan-flag">TODAY</span>' : ''}</div>
+        ${p.geoApprox ? '<div class="geo-warn">&#9888; Check address \u2014 the map only found the suburb</div>' : ''}
         <div class="p-meta">${[p.suburb ? escapeHtml(p.suburb) : '', stateFilter.size !== 1 ? (p.state || '') : '', p.bdm && p.bdm !== currentBDM ? escapeHtml(p.bdm) : '', p.contactName ? escapeHtml(p.contactName) : ''].filter(Boolean).join(' · ')}</div>
+        ${routeStops.has(p.id) ? `<div class="leg-line">≈ ${routeStops.get(p.id).km < 10 ? routeStops.get(p.id).km.toFixed(1) : Math.round(routeStops.get(p.id).km)} km from ${routeStops.get(p.id).n === 1 ? escapeHtml(routeInfo.origin.label) : 'stop ' + (routeStops.get(p.id).n - 1)}</div>` : ''}
         ${nearDist.has(p.id) ? `<div class="near-line">${nearDist.get(p.id) < 10 ? nearDist.get(p.id).toFixed(1) : Math.round(nearDist.get(p.id))} km away<a href="${directionsUrl(p)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Directions</a></div>` : ''}
         <div class="p-followup ${followUpClass}">${followUpLabel}</div>
       </div>
@@ -3268,6 +3512,13 @@ function render() {
 
   const dash = document.getElementById('dashboard');
   nearDist = new Map();
+  routeStops = new Map();
+  if (viewMode === 'today' && !(nearMode && myPos) && routeIsCurrent(todayList)) {
+    routeInfo.ids.forEach((id, i) => {
+      const p = findProspect(id), prev = i ? findProspect(routeInfo.ids[i - 1]) : routeInfo.origin;
+      routeStops.set(id, { n: i + 1, km: distanceKm(prev.lat, prev.lng, p.lat, p.lng) * ROAD_FACTOR });
+    });
+  }
   let nearHtml = null;
   if (nearMode && myPos) {
     const pool = viewMode === 'cold' ? cold : viewMode === 'today' ? todayList : active;
@@ -3280,7 +3531,7 @@ function render() {
       (unplaced ? `<div class="empty-note">${unplaced} lead${unplaced !== 1 ? 's' : ''} in this view can't be placed \u2014 add a street address or suburb.</div>` : '');
   }
   const html = nearHtml !== null ? nearHtml : viewMode === 'today'
-    ? section(`Today's plan \u2014 ${escapeHtml(currentBDM)}`, 'today', todayList)
+    ? (todayList.length ? routeCardHtml(todayList) : '') + section(`Today's plan \u2014 ${escapeHtml(currentBDM)}`, 'today', todayList)
     : viewMode === 'cold'
     ? section(`Cold \u2014 not yet contacted, ${COLD_SORT_LABELS[coldSort]}`,'cold',cold)
     : section('Overdue','overdue',overdue) + section('Due today','today',today) +
