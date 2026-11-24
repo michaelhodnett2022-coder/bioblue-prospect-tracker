@@ -365,6 +365,18 @@ body { background:#071a33 linear-gradient(170deg,#04142a 0%,#0a2a52 55%,#0d3a6e 
 .stop-no { display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#64d2ff;color:#001f3f;font-size:12px;font-weight:800;margin-right:7px;vertical-align:2px; }
 .leg-line { font-size:11.5px;font-weight:700;color:#a8d4f5;margin-top:5px; }
 .geo-warn { font-size:11px;font-weight:700;color:#fbbf24;margin:1px 0 2px; }
+.dup-group { font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,0.45);margin:16px 0 6px; }
+.dup-item { background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:12px;margin-bottom:8px; }
+.dup-row { font-size:13px;line-height:1.4; }
+.dup-row b { font-weight:700; }
+.dup-row small { opacity:0.6; }
+.dup-arrow { font-size:11px;opacity:0.5;margin:3px 0; }
+.dup-why { font-size:11px;color:#a8d4f5;margin-top:6px; }
+.dup-adds { font-size:11.5px;margin-top:6px;color:#4ADE80; }
+.dup-diff { font-size:11.5px;margin-top:3px;color:#fbbf24; }
+.dup-actions { display:flex;gap:8px;margin-top:10px; }
+.dup-actions button { font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:8px 12px;border-radius:10px;cursor:pointer;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:white; }
+.dup-actions button.primary { background:#64d2ff;border-color:#64d2ff;color:#001f3f; }
 .section-label { margin:18px 2px 8px; }
 .p-card { border-radius:16px;padding:12px 14px 12px 16px;margin-bottom:8px;background:rgba(255,255,255,0.065);border-color:rgba(255,255,255,0.09);transition:transform .15s; }
 .p-card::before { width:4px;background:var(--bar,var(--accent,#64d2ff)); }
@@ -541,6 +553,14 @@ body.sheet-open { overflow:hidden; }
   </div>
 </div>
 
+<div class="sheet-overlay" id="dupSheet" onclick="if(event.target===this)closeSheet('dupSheet')">
+  <div class="sheet">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h3>&#128257; Duplicates</h3><button class="link-btn" onclick="closeSheet('dupSheet')">Done</button></div>
+    <div id="dupList"></div>
+  </div>
+</div>
+
 <div class="sheet-overlay" id="toolsSheet" onclick="if(event.target===this)closeSheet('toolsSheet')">
   <div class="sheet">
     <div class="sheet-grip"></div>
@@ -549,6 +569,7 @@ body.sheet-open { overflow:hidden; }
     <button class="menu-item" onclick="toolAction(openResearchModal)"><span class="mi-ico">&#128269;</span><span>Research an area<small>Claude finds new prospects and saves them to Drive</small></span></button>
     <button class="menu-item" onclick="toolAction(importFromDrive)"><span class="mi-ico">&#9729;&#65039;</span><span>Import from Drive<small>Bring in a Research Inbox sheet</small></span></button>
     <button class="menu-item" onclick="toolAction(openAddressModal)"><span class="mi-ico">&#129513;</span><span id="toolsMissing">Fill missing details<small>Addresses and business types</small></span></button>
+    <button class="menu-item" onclick="toolAction(openDuplicates)"><span class="mi-ico">&#128257;</span><span>Find duplicates<small>Merge double-ups, and spot leads that are already BioBlue clients</small></span></button>
     <button class="menu-item" onclick="toolAction(clearColdList)"><span class="mi-ico">&#129529;</span><span>Clear my Cold list<small>Start fresh: deletes untouched Cold leads so research can find them again</small></span></button>
     <div class="menu-group">Backup import</div>
     <button class="menu-item" onclick="toolAction(openPasteResearch)"><span class="mi-ico">&#128203;</span><span>Paste research<small>If Import from Drive won't open</small></span></button>
@@ -1424,24 +1445,38 @@ async function importResearchRows(rows, sourceLabel) {
     if (!rows.length) { alert(`No rows found in ${sourceLabel}. Nothing was imported.`); return false; }
     const hasImportCol = Object.keys(rows[0]).some(h => normKey(h) === 'import');
 
-    const existing = new Map(prospects.map(p => [leadKey(p.company, p.suburb), p]));
-    const existingNames = new Map(prospects.map(p => [normKey(p.company), p]));
-    const kept = [], thrown = [], skipped = [];
+    if (clientNamesCache.date !== todayStr()) { try { await loadClientNames(); } catch (e) {} }
+    const pool = prospects.filter(p => p.company && p.status !== TENDER).map(p => ({ p, sig: leadSig(p) }));
+    const csigs = clientSigs();
+    const kept = [], thrown = [], skipped = [], merges = [], clientSkips = [], similar = [];
     let noName = 0;
     rows.forEach(r => {
       const { p, keep } = rowToLead(r);
       if (!p.company) { noName++; return; }
-      const k = leadKey(p.company, p.suburb);
-      const sameName = existingNames.get(normKey(p.company));
-      const match = existing.get(k) || (sameName && (!p.suburb || !sameName.suburb) ? sameName : null);
-      if (match) { skipped.push(`${p.company} (${match.status === THROWN_BACK ? 'marked N before' : match.status === REMOVED ? 'removed before' : 'already in Tracker'})`); return; }
-      existing.set(k, p);
-      if (!existingNames.has(normKey(p.company))) existingNames.set(normKey(p.company), p);
+      const sig = leadSig(p);
+      // Several matches: merge into the one highest in the pipeline.
+      const same = pool.filter(x => matchLevel(sig, x.sig) === 'same').reduce((best, x) => !best ? x : (pickKeeper(best.p, x.p)[0] === best.p ? best : x), null);
+      if (same) {
+        const m = same.p;
+        const inFile = kept.includes(m) || thrown.includes(m) || merges.some(x => x.keeper === m);
+        if (inFile || m.status === THROWN_BACK || m.status === REMOVED || m.status === 'Lost' || !keep) {
+          skipped.push(`${p.company} (${inFile ? 'twice in this file' : m.status === THROWN_BACK ? 'marked N before' : m.status === REMOVED ? 'removed before' : m.status === 'Lost' ? 'marked Lost' : 'already in Tracker'})`);
+          return;
+        }
+        const plan = planMerge(m, p);
+        merges.push({ keeper: m, src: p, plan });
+        return;
+      }
+      const cm = findClientMatch(sig, csigs);
+      if (cm && cm.level === 'same' && keep) { clientSkips.push(`${p.company} \u2192 ${cm.c.kind}: ${cm.c.label}`); return; }
+      const poss = cm || (pool.find(x => matchLevel(sig, x.sig) === 'possible') ? { c: { label: pool.find(x => matchLevel(sig, x.sig) === 'possible').p.company } } : null);
+      if (poss && keep) similar.push(`${p.company} ~ ${poss.c.label}`);
+      pool.push({ p, sig });
       (keep ? kept : thrown).push(p);
     });
 
-    if (!kept.length && !thrown.length) {
-      alert(`Nothing new to import from ${sourceLabel}.` + (skipped.length ? `\n\nSkipped ${skipped.length}:\n${skipped.slice(0, 10).join('\n')}` : ''));
+    if (!kept.length && !thrown.length && !merges.length) {
+      alert(`Nothing new to import from ${sourceLabel}.` + (skipped.length ? `\n\nSkipped ${skipped.length}:\n${skipped.slice(0, 10).join('\n')}` : '') + (clientSkips.length ? `\n\nAlready with BioBlue (skipped) ${clientSkips.length}:\n${clientSkips.slice(0, 10).join('\n')}` : ''));
       return false;
     }
     const noState = kept.filter(p => !p.state).length;
@@ -1453,7 +1488,10 @@ async function importResearchRows(rows, sourceLabel) {
       `From ${sourceLabel}, assigned to ${currentBDM}:\n\n` +
       `• Import as Cold leads (Y): ${kept.length}\n` +
       `• Not imported, kept out of future research (N): ${thrown.length}\n` +
+      (merges.length ? `• Already in the Tracker \u2014 new details added to them: ${merges.length}\n   ${merges.slice(0, 6).map(x => `${x.keeper.company}: ${x.plan.adds.length ? x.plan.adds.join(', ') : 'nothing new'}`).join('\n   ')}${merges.length > 6 ? `\n   ...and ${merges.length - 6} more` : ''}\n` : '') +
+      (clientSkips.length ? `• Already with BioBlue \u2014 not imported: ${clientSkips.length}\n   ${clientSkips.slice(0, 6).join('\n   ')}${clientSkips.length > 6 ? `\n   ...and ${clientSkips.length - 6} more` : ''}\n` : '') +
       (skipped.length ? `• Skipped, already known: ${skipped.length}\n   ${skipped.slice(0, 6).join('\n   ')}${skipped.length > 6 ? `\n   ...and ${skipped.length - 6} more` : ''}\n` : '') +
+      (similar.length ? `• Imported, but look like an existing lead or client (check \u22EF Find duplicates): ${similar.length}\n   ${similar.slice(0, 4).join('\n   ')}${similar.length > 4 ? `\n   ...and ${similar.length - 4} more` : ''}\n` : '') +
       (noName ? `• Ignored, no company name: ${noName}\n` : '') +
       coverage +
       (noState ? `\n${noState} kept lead(s) have no valid state — set it on the card.\n` : '') +
@@ -1462,13 +1500,21 @@ async function importResearchRows(rows, sourceLabel) {
     if (!confirm(msg)) { showToast('Import cancelled — nothing changed'); return false; }
 
     const added = [...kept, ...thrown];
+    const mergeBackup = merges.map(x => [x.keeper, JSON.stringify(x.keeper)]);
+    merges.forEach(x => applyMerge(x.keeper, x.src, x.plan, `from research (${sourceLabel})`));
     prospects = [...added, ...prospects];
     const saved = await saveTracker();
-    if (!saved) { prospects = prospects.filter(p => !added.includes(p)); render(); alert('Import could not be saved to Drive, so nothing was changed. Tap Load and try again.'); return false; }
+    if (!saved) {
+      prospects = prospects.filter(p => !added.includes(p));
+      mergeBackup.forEach(([k, json]) => { Object.keys(k).forEach(f => delete k[f]); Object.assign(k, JSON.parse(json)); });
+      render(); alert('Import could not be saved to Drive, so nothing was changed. Tap Load and try again.'); return false;
+    }
+    const mergedMoved = merges.map(x => x.keeper).filter(k => k.streetAddress && !hasCoords(k));
+    if (mergedMoved.length) geocodeMissing(mergedMoved).then(n => { if (n) saveTracker(); }).catch(() => {});
     if (kept.length) setViewMode('cold'); else render();
     // Place the new leads on the map now, at the desk, so Near me works straight away in the field.
     if (kept.length) geocodeMissing(kept).then(n => { if (n) saveTracker(); }).catch(() => {});
-    showToast(`✅ ${kept.length} lead${kept.length !== 1 ? 's' : ''} added to Cold`);
+    showToast(`\u2705 ${kept.length} lead${kept.length !== 1 ? 's' : ''} added to Cold${merges.length ? `, ${merges.length} existing lead${merges.length !== 1 ? 's' : ''} updated` : ''}`);
     return true;
 }
 
@@ -1839,6 +1885,222 @@ function directionsUrl(p) {
 // =====================================================================
 const RESEARCH_MAX_CHARS = 13000;
 
+// =====================================================================
+// DUPLICATES — the same business entered twice (often a research import
+// of a lead you already have), and leads that are already BioBlue clients.
+// "Same" = same name once "Pty Ltd / Group / The / &" etc. are ignored (and
+// the same suburb, or one has none), or the same phone, or the same street
+// address. "Possible" = one name inside the other, or same name in another
+// suburb — shown for you to decide, never merged on its own.
+// =====================================================================
+const CO_NOISE = /\b(pty|ltd|limited|proprietary|the|group|holdings|co|company|and|trading|as|ta|incorporated|inc)\b/g;
+function coKey(name) {
+  return (name || '').toString().toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9 ]/g, ' ').replace(CO_NOISE, ' ').replace(/\s+/g, '');
+}
+function phoneKey(v) {
+  let d = (v || '').toString().replace(/\D/g, '');
+  if (d.startsWith('61')) d = '0' + d.slice(2);
+  return d.length >= 8 ? d.slice(-9) : '';
+}
+function addrKey(street, suburb) {
+  const st = normKey(street);
+  return st && !/^pobox/.test(st) ? st + '|' + normKey(suburb) : '';
+}
+function leadPhones(p) { return [p.contactPhone, p.contact2Phone].map(phoneKey).filter(Boolean); }
+// Compare a lead-like {company, suburb, state, streetAddress, phones} with another.
+function matchLevel(a, b) {
+  const ka = coKey(a.company), kb = coKey(b.company);
+  if (!ka || !kb) return '';
+  const subA = normKey(a.suburb), subB = normKey(b.suburb);
+  if (ka === kb && (!subA || !subB || subA === subB)) return 'same';
+  if (a.phones.length && b.phones.some(x => a.phones.includes(x))) return 'same';
+  if (a.addr && a.addr === b.addr) return 'same';
+  if (ka === kb) return 'possible';
+  const [short, long] = ka.length <= kb.length ? [ka, kb] : [kb, ka];
+  if (short.length >= 6 && long.includes(short) && (!a.state || !b.state || a.state === b.state)) return 'possible';
+  return '';
+}
+function leadSig(p) { return { company: p.company, suburb: p.suburb, state: p.state, addr: addrKey(p.streetAddress, p.suburb), phones: leadPhones(p) }; }
+function clientSigs() {
+  const c = clientNamesCache || {};
+  const own = new Set(prospects.filter(p => p.clientId).map(p => String(p.clientId)));
+  const out = [];
+  (c.recs || []).forEach(r => {
+    if (r.id && own.has(r.id)) return;            // that record IS a Tracker lead
+    const label = (r.n || r.s) + (r.s && r.n && r.s !== r.n ? ' – ' + r.s : '') + (r.sub ? ` (${r.sub})` : '');
+    const kind = r.cust ? 'BioBlue client' : 'in Client Records';
+    out.push({ company: r.n || r.s, suburb: r.sub, state: r.st, addr: r.a, phones: r.ph || [], label, kind });
+    if (r.s && r.n && coKey(r.s) !== coKey(r.n)) out.push({ company: r.s, suburb: r.sub, state: r.st, addr: r.a, phones: r.ph || [], label, kind });
+  });
+  (c.folders || []).forEach(f => out.push({ company: f.n, suburb: f.sub, state: f.st, addr: '', phones: [], label: `${f.n}${f.s ? ' – ' + f.s : ''} (${f.sub})`, kind: 'Audits folder' }));
+  return out;
+}
+function findClientMatch(sig, sigs) {
+  let possible = null;
+  for (const c of sigs) {
+    const lv = matchLevel(sig, c);
+    if (lv === 'same') return { level: 'same', c };
+    if (lv === 'possible' && !possible) possible = { level: 'possible', c };
+  }
+  return possible;
+}
+const STATUS_RANK = { 'Won': 6, 'Negotiating': 5, 'Quoted': 4, 'Engaged': 3, 'Contacted': 2, 'New Lead': 1, 'Lost': 0 };
+const AUTO_NOTE_RE = /^(Imported from research|Street address added from research|Marked N on research import|Details merged)/;
+function realActivity(p) { return (p.activity || []).filter(a => a.type !== 'note' || !AUTO_NOTE_RE.test(a.text || '')).length; }
+function pickKeeper(a, b) {
+  const score = p => [STATUS_RANK[p.status] ?? -1, p.clientId ? 1 : 0, realActivity(p)];
+  const sa = score(a), sb = score(b);
+  for (let i = 0; i < 3; i++) if (sa[i] !== sb[i]) return sa[i] > sb[i] ? [a, b] : [b, a];
+  return (a.createdDate || '9') <= (b.createdDate || '9') ? [a, b] : [b, a];
+}
+const MERGE_LABELS = {
+  businessType: 'business type', state: 'state', streetAddress: 'street address', suburb: 'suburb', postcode: 'postcode',
+  descriptor: 'site type', productInterest: 'product interest', currentSupplier: 'current supplier', estimatedVolumeLitres: 'volume',
+  researchGrade: 'grade', researchWhy: 'research notes', researchSource: 'source', clientId: 'Client ID'
+};
+// What merging src into keeper would do: fill keeper's blanks, never overwrite.
+function planMerge(keeper, src) {
+  const fills = {}, adds = [], diffs = [];
+  const val = (o, f) => (o[f] === null || o[f] === undefined ? '' : String(o[f]).trim());
+  Object.keys(MERGE_LABELS).forEach(f => {
+    const v = val(src, f), cur = val(keeper, f);
+    if (!v) return;
+    if (!cur) { fills[f] = src[f]; adds.push(MERGE_LABELS[f]); }
+    else if (normKey(cur) !== normKey(v) && ['streetAddress', 'currentSupplier', 'businessType'].includes(f)) diffs.push(`${MERGE_LABELS[f]}: ${v}`);
+  });
+  if (fills.streetAddress) { if (src.suburb) fills.suburb = src.suburb; if (src.postcode) fills.postcode = src.postcode; }
+  if (fills.estimatedVolumeLitres) fills.estimatedVolumePeriod = src.estimatedVolumePeriod;
+  // Contacts travel as a group, so a phone never lands against the wrong person.
+  const grp = (o, n) => ({ name: val(o, `contact${n}Name`), role: val(o, `contact${n}Role`), phone: val(o, `contact${n}Phone`), email: val(o, `contact${n}Email`) });
+  const put = (n, g) => { fills[`contact${n}Name`] = g.name; fills[`contact${n}Role`] = g.role; fills[`contact${n}Phone`] = g.phone; fills[`contact${n}Email`] = g.email; };
+  const kSlots = [grp(keeper, ''), grp(keeper, '2')];
+  [grp(src, ''), grp(src, '2')].forEach(g => {
+    if (!g.name && !g.phone && !g.email) return;
+    const sameAs = kSlots.findIndex(k => (g.name && normKey(k.name) === normKey(g.name)) || (!g.name && g.phone && phoneKey(k.phone) === phoneKey(g.phone)));
+    if (sameAs >= 0) {
+      const k = kSlots[sameAs], n = sameAs ? '2' : '';
+      ['role', 'phone', 'email'].forEach(x => {
+        if (g[x] && !k[x]) { fills[`contact${n}${x[0].toUpperCase() + x.slice(1)}`] = g[x]; k[x] = g[x]; adds.push(`${g.name || 'contact'} ${x}`); }
+        else if (g[x] && k[x] && x !== 'role' && (x === 'phone' ? phoneKey(g[x]) !== phoneKey(k[x]) : normKey(g[x]) !== normKey(k[x]))) diffs.push(`${g.name || 'contact'} ${x}: ${g[x]}`);
+      });
+      return;
+    }
+    const free = kSlots.findIndex(k => !k.name && !k.phone && !k.email);
+    if (free >= 0) { put(free ? '2' : '', g); kSlots[free] = { ...g }; adds.push(g.name ? `contact ${g.name}` : `phone ${g.phone}`); }
+    else diffs.push(`contact: ${[g.name, g.role, g.phone, g.email].filter(Boolean).join(', ')}`);
+  });
+  return { fills, adds, diffs };
+}
+function applyMerge(keeper, src, plan, how) {
+  Object.assign(keeper, plan.fills);
+  if (plan.fills.streetAddress || plan.fills.suburb) { delete keeper.lat; delete keeper.lng; delete keeper.geoAddr; delete keeper.geoFailed; delete keeper.geoApprox; }
+  const today = todayStr();
+  const moved = (src.activity || []).filter(a => a.type !== 'note' || !AUTO_NOTE_RE.test(a.text || ''));
+  keeper.activity = (keeper.activity || []).concat(moved).sort((x, y) => (x.date || '').localeCompare(y.date || ''));
+  if (src.planDate === today && keeper.planDate !== today) { keeper.planDate = src.planDate; keeper.planBy = src.planBy; keeper.planAt = src.planAt; }
+  keeper.activity.push({ date: today, type: 'note', text: `Details merged ${how}${plan.adds.length ? ': added ' + plan.adds.join(', ') : ''}${plan.diffs.length ? '. Also listed (not used): ' + plan.diffs.join('; ') : ''}` });
+}
+
+// ---- Find duplicates sheet
+function notSamePair(a, b) { return (a.notSame || []).includes(b.id) || (b.notSame || []).includes(a.id); }
+function findDuplicatePairs() {
+  const live = prospects.filter(p => p.company && p.status !== TENDER && p.status !== REMOVED && p.status !== THROWN_BACK);
+  const sigs = live.map(leadSig);
+  const pairs = [];
+  for (let i = 0; i < live.length; i++) {
+    for (let j = i + 1; j < live.length; j++) {
+      const a = live[i], b = live[j];
+      if (a.clientId && b.clientId && a.clientId !== b.clientId) continue;   // two records: sort in Client Records
+      if (notSamePair(a, b)) continue;
+      const lv = matchLevel(sigs[i], sigs[j]);
+      if (!lv) continue;
+      const [keeper, src] = pickKeeper(a, b);
+      pairs.push({ level: lv, keeper, src });
+    }
+  }
+  const csigs = clientSigs();
+  const clients = live.filter(p => p.status === 'New Lead' && !p.clientId)
+    .map(p => ({ p, m: findClientMatch(leadSig(p), csigs) })).filter(x => x.m && !(x.p.notClient || []).includes(x.m.c.label));
+  return { pairs, clients };
+}
+let dupFound = { pairs: [], clients: [] };
+async function openDuplicates() {
+  if (trackerFileId && clientNamesCache.date !== todayStr()) {
+    document.getElementById('dupList').innerHTML = '<div class="empty-note">Checking Client Records and the Audits folders&hellip;</div>';
+    openSheet('dupSheet');
+    try { await loadClientNames(); } catch (e) {}
+  }
+  renderDuplicates();
+  openSheet('dupSheet');
+}
+function dupLeadLine(p) {
+  return `<b>${escapeHtml(p.company)}</b> <small>${[p.status === 'New Lead' ? 'Cold' : p.status, p.suburb, p.state, p.bdm].filter(Boolean).map(escapeHtml).join(' · ')}</small>`;
+}
+function renderDuplicates() {
+  dupFound = findDuplicatePairs();
+  const { pairs, clients } = dupFound;
+  const pairHtml = (x, i) => {
+    const plan = planMerge(x.keeper, x.src);
+    const why = x.level === 'same' ? 'Same business' : 'Possibly the same — check before merging';
+    return `<div class="dup-item">
+      <div class="dup-row">Keep: ${dupLeadLine(x.keeper)}</div>
+      <div class="dup-arrow">&#8593; merge in and delete</div>
+      <div class="dup-row">${dupLeadLine(x.src)}</div>
+      <div class="dup-why">${why}</div>
+      <div class="dup-adds">${plan.adds.length ? 'Adds: ' + escapeHtml(plan.adds.join(', ')) : 'Nothing new to add'}</div>
+      ${plan.diffs.length ? `<div class="dup-diff">Differs (kept yours, noted on the card): ${escapeHtml(plan.diffs.join('; '))}</div>` : ''}
+      <div class="dup-actions"><button class="primary" onclick="mergePair(${i})">Merge</button><button onclick="notSame(${i})">Not the same</button></div>
+    </div>`;
+  };
+  const same = pairs.map((x, i) => [x, i]).filter(([x]) => x.level === 'same');
+  const poss = pairs.map((x, i) => [x, i]).filter(([x]) => x.level === 'possible');
+  const clientHtml = (x, i) => `<div class="dup-item">
+      <div class="dup-row">${dupLeadLine(x.p)}</div>
+      <div class="dup-why">${x.m.level === 'same' ? 'Matches' : 'Looks like'} ${escapeHtml(x.m.c.kind)}: <b>${escapeHtml(x.m.c.label)}</b></div>
+      <div class="dup-actions"><button class="primary" onclick="removeClientLead(${i})">Remove from Cold</button><button onclick="notClient(${i})">Not the same</button></div>
+    </div>`;
+  document.getElementById('dupList').innerHTML =
+    (!pairs.length && !clients.length ? '<div class="empty-note">No duplicates found, and no Cold leads match existing clients.</div>' : '') +
+    (same.length ? `<div class="dup-group">Same business (${same.length})</div>` + same.map(([x, i]) => pairHtml(x, i)).join('') : '') +
+    (poss.length ? `<div class="dup-group">Possibly the same (${poss.length})</div>` + poss.map(([x, i]) => pairHtml(x, i)).join('') : '') +
+    (clients.length ? `<div class="dup-group">Already with BioBlue (${clients.length})</div>` + clients.map(clientHtml).join('') : '') +
+    ((clientNamesCache.recs || []).length ? '' : '<div class="route-note">Client Records could not be checked — tap Load, then try again.</div>');
+}
+async function mergePair(i) {
+  const x = dupFound.pairs[i]; if (!x) return;
+  const plan = planMerge(x.keeper, x.src);
+  if (!confirm(`Merge into "${x.keeper.company}" (${x.keeper.status === 'New Lead' ? 'Cold' : x.keeper.status})?\n\n${plan.adds.length ? 'Adds: ' + plan.adds.join(', ') : 'Nothing new to add'}${plan.diffs.length ? '\nDiffers (kept yours, noted): ' + plan.diffs.join('; ') : ''}\n\nThen "${x.src.company}" is deleted.`)) return;
+  const before = JSON.stringify(x.keeper), backup = prospects.slice();
+  applyMerge(x.keeper, x.src, plan, `from duplicate "${x.src.company}"`);
+  prospects = prospects.filter(p => p !== x.src);
+  const saved = await saveTracker();
+  if (!saved) { Object.assign(x.keeper, JSON.parse(before)); prospects = backup; alert('Could not save to Drive, so nothing changed. Tap Load and try again.'); }
+  else showToast(`✅ Merged into ${x.keeper.company}`);
+  render(); renderDuplicates();
+  if (saved && x.keeper.streetAddress && !hasCoords(x.keeper)) geocodeMissing([x.keeper]).then(n => { if (n) saveTracker(); }).catch(() => {});
+}
+function notSame(i) {
+  const x = dupFound.pairs[i]; if (!x) return;
+  x.keeper.notSame = [...new Set([...(x.keeper.notSame || []), x.src.id])];
+  x.src.notSame = [...new Set([...(x.src.notSame || []), x.keeper.id])];
+  saveTracker(); renderDuplicates();
+}
+async function removeClientLead(i) {
+  const x = dupFound.clients[i]; if (!x) return;
+  if (!confirm(`Remove "${x.p.company}" from Cold?\n\nIt matches ${x.m.c.kind}: ${x.m.c.label}. Existing clients are managed in the Prospect/Client form, not the Tracker.`)) return;
+  const backup = prospects.slice();
+  prospects = prospects.filter(p => p !== x.p);
+  const saved = await saveTracker();
+  if (!saved) { prospects = backup; alert('Could not save to Drive, so nothing changed.'); }
+  else showToast(`Removed ${x.p.company}`);
+  render(); renderDuplicates();
+}
+function notClient(i) {
+  const x = dupFound.clients[i]; if (!x) return;
+  x.p.notClient = [...new Set([...(x.p.notClient || []), x.m.c.label])];
+  saveTracker(); renderDuplicates();
+}
+
 // Existing BioBlue clients from Client Records, so research never brings one back.
 // Loaded in the background after Load (and when Research opens), cached for the day.
 let clientNamesCache = (() => { try { return JSON.parse(localStorage.getItem('bb_client_names') || '{}'); } catch (e) { return {}; } })();
@@ -1852,12 +2114,33 @@ async function loadClientNames() {
     if (!dl.ok) throw new Error('Client Records ' + dl.status);
     const wb = XLSX.read(new Uint8Array(await dl.arrayBuffer()), { type: 'array' });
     const rows = XLSX.utils.sheet_to_json(wb.Sheets['Client Records'] || wb.Sheets[wb.SheetNames[0]], { defval: '' });
-    const seen = new Map();
+    const seen = new Map(), recs = [];
     rows.forEach(r => {
       const nm = String(r['Billing Entity'] || r['Site Name'] || '').trim();
       if (nm && !seen.has(normKey(nm))) seen.set(normKey(nm), nm);
+      const site = String(r['Site Name'] || '').trim();
+      if (!nm && !site) return;
+      const phones = ['Business Contact Phone', 'KDM Phone', 'Logistics Phone', 'Admin Contact Phone', 'Contact Mobile', 'Other Contact Phone']
+        .map(h => phoneKey(r[h])).filter(Boolean);
+      recs.push({ id: String(r['Client ID'] || ''), n: nm, s: site, sub: String(r['Suburb'] || ''), st: String(r['State'] || ''),
+        a: addrKey(r['Street Address'], r['Suburb']), ph: [...new Set(phones)], cust: !!String(r['Customer \u2713'] || '').trim() });
     });
-    clientNamesCache = { date: todayStr(), names: [...seen.values()].sort((a, b) => a.localeCompare(b)) };
+    // Client folders in the BioBlue Audits Drive folder ("Company – Site (Suburb, STATE)").
+    const folders = [];
+    try {
+      let pageToken = '';
+      do {
+        const q = encodeURIComponent(`'${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+        const fr = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(name)&pageSize=1000${pageToken ? '&pageToken=' + pageToken : ''}`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+        const fd = await fr.json();
+        (fd.files || []).forEach(f => {
+          const m = f.name.match(/^(.*?)(?:\s+[\u2013\u2014-]\s+(.*?))?\s*\(([^,()]*),\s*([A-Z]{2,3})\)\s*$/);
+          if (m) folders.push({ n: m[1].trim(), s: (m[2] || '').trim(), sub: m[3].trim(), st: m[4] });
+        });
+        pageToken = fd.nextPageToken || '';
+      } while (pageToken);
+    } catch (e) { /* folders are a bonus; Client Records is the main list */ }
+    clientNamesCache = { date: todayStr(), names: [...seen.values()].sort((a, b) => a.localeCompare(b)), recs, folders };
     try { localStorage.setItem('bb_client_names', JSON.stringify(clientNamesCache)); } catch (e) {}
   } finally {
     delete clientNamesCache.loading;
@@ -2304,9 +2587,7 @@ async function clearColdList() {
   if (!ok) { showToast('\u26A0\uFE0F Could not connect to Drive \u2014 tap Load first'); return; }
   const mine = p => (p.bdm || '') === currentBDM;
   // Auto notes written by imports don't count as being worked; calls, emails, visits and your own notes do.
-  const AUTO_NOTE = /^(Imported from research|Street address added from research|Marked N on research import)/;
-  const untouched = p => !p.clientId && p.planDate !== todayStr() &&
-    !(p.activity || []).some(a => a.type !== 'note' || !AUTO_NOTE.test(a.text || ''));
+  const untouched = p => !p.clientId && p.planDate !== todayStr() && !realActivity(p);
   const cold = prospects.filter(p => mine(p) && p.status === 'New Lead' && untouched(p));
   const keptCold = prospects.filter(p => mine(p) && p.status === 'New Lead' && !untouched(p)).length;
   const removed = prospects.filter(p => mine(p) && p.status === REMOVED && !p.clientId);
