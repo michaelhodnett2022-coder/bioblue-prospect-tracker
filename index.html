@@ -429,6 +429,7 @@ body.sheet-open { overflow:hidden; }
 .p-top-right { display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none; }
 .email-tick, .pick-box { font-family:'DM Sans',sans-serif;font-size:11px;font-weight:700;padding:5px 9px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.25);background:transparent;color:rgba(255,255,255,0.75);cursor:pointer;white-space:nowrap; }
 .email-tick.on { background:#fbbf24;border-color:#fbbf24;color:#2a1a00; }
+.email-tick.ghost { opacity:0.35;border-style:dashed;cursor:not-allowed; }
 .pick-box { font-size:15px;padding:2px 8px; }
 .pick-box.on { background:#64d2ff;border-color:#64d2ff;color:#001f3f; }
 .sel-row { text-align:right;margin:-2px 0 6px; }
@@ -3437,6 +3438,8 @@ function updateField(id, field, value) {
     const metaEl = card.querySelector('.p-meta');
     if (nameEl) nameEl.textContent = p.company;
     if (metaEl) metaEl.textContent = `${p.state}${p.bdm ? ' · ' + p.bdm : ''}${p.contactName ? ' · ' + p.contactName : ''}`;
+    const topEl = card.querySelector('.p-top-right');
+    if (topEl && /Email$/.test(field)) topEl.innerHTML = `${p.status === 'New Lead' ? '' : `<div class="p-status-badge">${p.status}</div>`}${cardTopButtons(p)}`;
   }
 }
 
@@ -4306,7 +4309,10 @@ function cardTopButtons(p) {
   let h = '';
   if (emailEnabledFor(p)) {
     const on = inEmailBatch(p);
-    h += `<button class="email-tick${on ? ' on' : ''}" onclick="event.stopPropagation();toggleEmailBatch('${p.id}')">${on ? '&#10003; Email' : '&#9993; Email'}</button>`;
+    const noAddr = !on && !emailRecipient(p).to;
+    h += noAddr
+      ? `<button class="email-tick ghost" aria-disabled="true" onclick="event.stopPropagation()">&#9993; Email</button>`
+      : `<button class="email-tick${on ? ' on' : ''}" onclick="event.stopPropagation();toggleEmailBatch('${p.id}')">${on ? '&#10003; Email' : '&#9993; Email'}</button>`;
   }
   if (coldSelect && viewMode === 'cold' && p.status === 'New Lead') {
     const on = coldPicked.has(p.id);
