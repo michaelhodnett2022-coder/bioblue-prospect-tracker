@@ -576,6 +576,7 @@ body.sheet-open { overflow:hidden; }
       <div class="menu-group">Admin</div>
       <button class="menu-item" onclick="toolAction(openResearchModal)"><span class="mi-ico">&#128269;</span><span>Research an area<small>Claude finds new prospects and saves them to Drive</small><small>Needs Claude, with Drive connected to the BioBlue account</small></span></button>
       <button class="menu-item" onclick="toolAction(openAddressModal)"><span class="mi-ico">&#129513;</span><span id="toolsMissing">Fill missing details<small>Addresses and business types</small><small>Needs Claude, with Drive connected to the BioBlue account</small></span></button>
+      <button class="menu-item" onclick="toolAction(openTenderSweep)"><span class="mi-ico">&#128276;</span><span>Run tender sweep now<small>Opens your Claude scheduled tasks: tap BioBlue Tender &amp; Signals Watch, then Run now</small></span></button>
       <button class="menu-item" onclick="toolAction(openDuplicates)"><span class="mi-ico">&#128257;</span><span>Find duplicates<small>Merge double-ups, and spot leads that are already BioBlue clients</small></span></button>
       <button class="menu-item" onclick="toolAction(clearColdList)"><span class="mi-ico">&#129529;</span><span>Clear my Cold list<small>Start fresh: deletes untouched Cold leads so research can find them again</small></span></button>
       <button class="menu-item" onclick="toolAction(backfillCoords)"><span class="mi-ico">&#128205;</span><span>Place leads on the map<small>One-off: store map positions for leads that don't have one yet</small></span></button>
@@ -3059,6 +3060,22 @@ function openNewLead() {
 // Tools menu: close the sheet, then run the action in the same tap (the
 // Drive picker and file chooser need to start from a real tap).
 function toolAction(fn) { closeSheet('toolsSheet'); fn(); }
+
+// Manual tender sweep: the Monday "BioBlue Tender & Signals Watch" scheduled
+// task can't be started from a web page, so this opens Claude's scheduled
+// tasks list where Run now starts the exact same sweep. Link opened straight
+// from the tap so Safari allows it.
+const SCHEDULED_TASKS_URL = 'https://claude.ai/code/scheduled';
+function openTenderSweep() {
+  const a = document.createElement('a');
+  a.href = SCHEDULED_TASKS_URL;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  showToast('Tap BioBlue Tender & Signals Watch, then Run now. New tenders come in with Import from Drive.');
+}
 
 // ADMIN — a folder in Tools, closed every time Tools opens, holding the
 // tools that merge or delete leads. Not a lock: just out of the way.
