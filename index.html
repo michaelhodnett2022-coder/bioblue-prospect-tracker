@@ -156,6 +156,7 @@ body {
 }
 .qa-btn.promote { border-color:#4ADE80;color:#4ADE80; }
 .qa-btn.lost { border-color:#f87171;color:#f87171; }
+.qa-btn.done { border-color:#4ADE80;color:#4ADE80;background:rgba(74,222,128,0.12); }
 .activity-log { margin-top:10px;max-height:180px;overflow-y:auto; }
 .activity-entry {
   font-size:11.5px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.06);
@@ -211,7 +212,7 @@ body {
 #researchModal input { width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:white;font-family:'DM Sans',sans-serif;font-size:13px; }
 #researchModal input::placeholder { color:rgba(255,255,255,0.4); }
 .undo-bar button { background:#64d2ff;color:#001f3f;border:none;border-radius:8px;padding:6px 12px;font-weight:800;font-size:12px;cursor:pointer; }
-.remove-row { margin-top:14px;text-align:right; }
+.remove-row { margin-top:14px;text-align:left;padding-bottom:56px; }
 .remove-link { font-size:11.5px;color:#f87171;text-decoration:underline;cursor:pointer;background:none;border:none;font-family:inherit; }
 .remove-blocked { font-size:11px;color:rgba(255,255,255,0.45); }
 
@@ -570,7 +571,10 @@ body.sheet-open { overflow:hidden; }
         <input type="text" id="nlContactPhone" placeholder="Phone (optional)">
         <input type="text" id="nlContactEmail" placeholder="Email (optional)">
       </div>
-      <button class="btn btn-primary sheet-done" style="margin-top:8px;" onclick="addNewLead()">Add to Cold</button>
+      <div class="sheet-row" style="margin-top:8px;">
+        <button class="btn btn-ghost sheet-done" style="margin-top:0;" onclick="addNewLead(false)">Add to Cold</button>
+        <button class="btn btn-primary sheet-done" style="margin-top:0;" onclick="addNewLead(true)">Add to Pipeline</button>
+      </div>
     </div>
   </div>
 </div>
@@ -3150,7 +3154,7 @@ function toggleAdminTools() {
   document.getElementById('adminChevron').innerHTML = open ? '&#9662;' : '&#9656;';
 }
 
-function addNewLead() {
+function addNewLead(toPipeline) {
   const company = document.getElementById('nlCompany').value.trim();
   if (!company) { showToast('Company name is required'); return; }
   if (!document.getElementById('nlState').value) { showToast('Select a state for this lead'); return; }
@@ -3162,19 +3166,20 @@ function addNewLead() {
     contactName: document.getElementById('nlContactName').value.trim(),
     contactPhone: document.getElementById('nlContactPhone').value.trim(),
     contactEmail: document.getElementById('nlContactEmail').value.trim(),
-    status: 'New Lead',
-    activity: [],
+    status: toPipeline ? 'Targeted' : 'New Lead',
+    activity: toPipeline ? [{ date: todayStr(), type: 'note', text: `Added to pipeline \u2014 no contact yet (${currentBDM})` }] : [],
     nextFollowUp: null,
     lostReason: null,
     createdDate: todayStr(),
     clientId: null
   };
+  if (toPipeline) p.pipelineAddedDate = todayStr();
   prospects.unshift(p);
   ['nlCompany','nlContactName','nlContactPhone','nlContactEmail'].forEach(id => document.getElementById(id).value = '');
   saveTracker();
   closeSheet('newLeadSheet');
   render();
-  showToast('Added to Cold \u2014 log a call, email or visit to move it into Pipeline');
+  showToast(toPipeline ? `${company} added to Pipeline (Targeted)` : 'Added to Cold \u2014 log a call, email or visit to move it into Pipeline');
 }
 
 // =====================================================================
@@ -3959,9 +3964,9 @@ function cardHtml(p) {
         </div>
       </div>
       <div class="quick-actions">
-        <button class="qa-btn" onclick="quickLogCall('${p.id}')">\u260E\uFE0F Call made</button>
-        <button class="qa-btn" onclick="quickLogEmail('${p.id}')">\u2709\uFE0F Email sent</button>
-        <button class="qa-btn" onclick="quickLogVisit('${p.id}')">\uD83E\uDD1D F2F visit</button>
+        ${logTile(p, 'call', 'quickLogCall', '\u260E\uFE0F', 'Call made')}
+        ${logTile(p, 'email', 'quickLogEmail', '\u2709\uFE0F', 'Email sent')}
+        ${logTile(p, 'visit', 'quickLogVisit', '\uD83E\uDD1D', 'F2F visit')}
         ${p.status === 'New Lead' ? `<button class="qa-btn promote" onclick="addToPipeline(['${p.id}'])">\u2192 Add to Pipeline</button>` : ''}
         ${p.status === 'Targeted' && !wasContacted(p) ? `<button class="qa-btn" onclick="backToCold('${p.id}')">\u2190 Back to Cold</button>` : ''}
         <button class="qa-btn promote" onclick="generateQuote('${p.id}')">${p.clientId ? '\u2192 Open quote builder' : '\u2192 Generate quote'}</button>
@@ -3989,6 +3994,15 @@ function cardHtml(p) {
 function wasContacted(p) {
   return ['Contacted', 'Engaged', 'Quoted', 'Negotiating', 'Won'].includes(p.status) ||
     (p.activity || []).some(a => a.type === 'call' || a.type === 'email' || a.type === 'visit');
+}
+
+// Call / Email / F2F tiles turn green with the date of the last one logged.
+// Tapping still logs another, as before.
+function logTile(p, type, fn, ico, label) {
+  const last = (p.activity || []).filter(a => a.type === type).reduce((m, a) => (a.date || '') > m ? a.date : m, '');
+  return last
+    ? `<button class="qa-btn done" onclick="${fn}('${p.id}')">\u2713 ${label} \u00B7 ${fmtDate(last)}</button>`
+    : `<button class="qa-btn" onclick="${fn}('${p.id}')">${ico} ${label}</button>`;
 }
 
 // ---- Add to Pipeline: untouched Cold lead -> Targeted, with a Note only
@@ -4081,15 +4095,14 @@ const EMAIL_P1 = {
 };
 const EMAIL_REST = "BioBlue also supplies onsite storage tanks to clients and provides full support and maintenance as part of our complete service philosophy.\n\n" +
   "I would like to discuss the AdBlue® needs of {Company} with you, as I believe BioBlue can offer a favourable supply arrangement in terms of both pricing and service, or at the very least, provide you with a reliable \"back up\" supply option.\n\n" +
-  "Please let me know if you would be keen to see some pricing, tailored specifically to your usage and needs.\n\n" +
-  "Kind Regards,";
+  "Please let me know if you would be keen to see some pricing, tailored specifically to your usage and needs.";
 const EMAIL_DEFAULTS = {
   'Michael Hodnett': {
-    subject: 'AdBlue® supply for {Company}',
+    subject: 'AdBlue® Arrangement for {Company}',
     National: `Good morning {FirstName},\n\n${EMAIL_P1.National}\n\n${EMAIL_REST}`,
     WA: `Good morning {FirstName},\n\n${EMAIL_P1.WA}\n\n${EMAIL_REST}`,
     NT: `Good morning {FirstName},\n\n${EMAIL_P1.NT}\n\n${EMAIL_REST}`,
-    followUpSubject: 'AdBlue® supply for {Company}',
+    followUpSubject: 'AdBlue® Arrangement for {Company}',
     followUp: ''
   }
 };
