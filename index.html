@@ -289,6 +289,9 @@ body { background:#071a33 linear-gradient(170deg,#04142a 0%,#0a2a52 55%,#0d3a6e 
 .sync-dot { position:absolute;top:2px;right:2px;width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,0.3);border:2px solid #061a33; }
 .status-line { display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:rgba(255,255,255,0.5);padding:2px 2px 10px;min-height:22px; }
 .status-line .sep { opacity:0.4; }
+.conn-dot { width:9px;height:9px;border-radius:50%;flex-shrink:0;background:rgba(255,255,255,0.3); }
+.conn-dot.on { background:#4ADE80;box-shadow:0 0 6px rgba(74,222,128,0.7); }
+.conn-dot.err { background:#f87171; }
 .status-line .sep:has(+ #authStatus:empty) { display:none; }
 .connect-card { display:flex;align-items:center;gap:12px;padding:14px;margin-bottom:12px;border-radius:var(--radius);
   background:linear-gradient(135deg,rgba(100,210,255,0.18),rgba(100,210,255,0.06));border:1px solid rgba(100,210,255,0.35); }
@@ -471,7 +474,7 @@ body.sheet-open { overflow:hidden; }
   <button class="tb-icon" onclick="openSheet('toolsSheet')" title="Tools" aria-label="Tools">&#8943;</button>
 </header>
 
-<div class="status-line" id="saveStatus"><span id="saveStatusText">Not connected yet</span><span class="sep">&middot;</span><span id="authStatus"></span></div>
+<div class="status-line" id="saveStatus"><span class="conn-dot" id="connDot" title="Not connected to Google"></span><span id="saveStatusText">Not connected yet</span><span class="sep">&middot;</span><span id="authStatus"></span></div>
 
 <div class="connect-card" id="connectCard">
   <div><b>Load your prospects</b><small>Connects to Google Drive and brings in the latest list</small></div>
@@ -806,6 +809,7 @@ window.fetch = async (url, opts) => {
   const r = await _rawFetch(url, opts);
   if (r.status === 401 && String(url).includes('googleapis.com')) {
     clearToken();
+    connRejected = true;
     setSaveStatus('error', 'Google sign-in expired \u2014 tap Load');
   }
   return r;
@@ -877,6 +881,27 @@ function forceRefresh() {
 
 function setAuthStatus(msg) { document.getElementById('authStatus').textContent = msg; }
 
+// v2.1: green dot = Google sign-in actually valid right now (token, not save
+// state). Re-checked every 30 s and on return to the app; grey once expired,
+// red after Google rejects a request (401). The dot on the sync button still
+// shows save state.
+let connRejected = false, _connWasOn = false;
+function updateConnDot(fromTimer) {
+  const dot = document.getElementById('connDot');
+  if (!dot) return;
+  const on = tokenLive();
+  if (on) connRejected = false;
+  dot.className = 'conn-dot' + (on ? ' on' : connRejected ? ' err' : '');
+  dot.title = on ? 'Connected to Google' : connRejected ? 'Google sign-in rejected \u2014 tap Load' : 'Not connected to Google';
+  if (fromTimer && _connWasOn && !on && !connRejected) {
+    const l = document.getElementById('saveStatusText');
+    if (l) l.textContent = 'Google disconnected \u2014 tap Load';
+  }
+  _connWasOn = on;
+}
+setInterval(() => updateConnDot(true), 30000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') updateConnDot(true); });
+
 function setSaveStatus(state, text) {
   const dot = document.getElementById('saveStatusDot');
   const label = document.getElementById('saveStatusText');
@@ -885,6 +910,7 @@ function setSaveStatus(state, text) {
   dot.style.background = colors[state] || colors.off;
   label.textContent = text;
   label.style.color = state === 'off' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.7)';
+  updateConnDot();
 }
 
 async function ensureToken() {
@@ -898,6 +924,7 @@ async function ensureToken() {
           gdriveToken = r.access_token;
           gdriveTokenExp = Date.now() + ((Number(r.expires_in) || 3600) - 120) * 1000;
           try { localStorage.setItem(TOKEN_STORE, JSON.stringify({ t: gdriveToken, exp: gdriveTokenExp })); } catch (e) {}
+          updateConnDot();
           resolve();
         }
         else reject(new Error(r.error || 'Sign-in failed'));
@@ -1227,7 +1254,7 @@ function callPhoneField(linkEl) {
 // mobile browsers can silently block a download that isn't a direct user
 // gesture, which is exactly what broke the original single-button version.
 // =====================================================================
-function generateVCardFile(name, role, phone, email, company, address, note) {
+function generateVCardFile(name, role, phone, email, company, address, note, mobile) {
   if (!name) return;
   const nameParts = name.split(' ');
   const firstName = nameParts[0] || '';
@@ -1239,7 +1266,8 @@ function generateVCardFile(name, role, phone, email, company, address, note) {
     'N:' + lastName + ';' + firstName + ';;;',
     company ? 'ORG:' + company : '',
     role    ? 'TITLE:' + role  : '',
-    phone   ? 'TEL;TYPE=CELL:' + phone : '',
+    mobile  ? 'TEL;TYPE=CELL:' + mobile : '',
+    phone   ? (mobile === undefined ? 'TEL;TYPE=CELL:' : 'TEL;TYPE=WORK,VOICE:') + phone : '',
     email   ? 'EMAIL:' + email : '',
     address ? 'ADR;TYPE=WORK:;;' + address : '',
     note    ? 'NOTE:' + note   : '',
@@ -1265,7 +1293,7 @@ function saveContactVCard(id, slot) {
   if (!p) return;
   const address = [p.streetAddress, p.suburb, p.state, p.postcode].filter(Boolean).join(', ');
   const note = 'BioBlue prospect contact \u2014 ' + (p.company || '') + '. Added by ' + (p.bdm || '') + '.';
-  if (slot === 1) generateVCardFile(p.contactName, p.contactRole, p.contactPhone, p.contactEmail, p.company, address, note);
+  if (slot === 1) generateVCardFile(p.contactName, p.contactRole, p.contactPhone, p.contactEmail, p.company, address, note, p.contactMobile || '');
   else if (slot === 2) generateVCardFile(p.contact2Name, p.contact2Role, p.contact2Phone, p.contact2Email, p.company, address, note);
   else if (slot === 3) generateVCardFile(p.contact3Name, p.contact3Label, p.contact3Phone, p.contact3Email, p.company, address, note);
 }
@@ -1610,6 +1638,7 @@ const IMPORT_COLUMNS = {
   contactName: ['contactname','sitecontactname'],
   contactRole: ['contactrole','sitecontactrole'],
   contactPhone: ['contactphone','sitecontactphone'],
+  contactMobile: ['contactmobile','sitecontactmobile','mobile','mobilephone'],
   contactEmail: ['contactemail','sitecontactemail'],
   contact2Name: ['kdmname','decisionmakername'],
   contact2Role: ['kdmrole','decisionmakerrole'],
@@ -1638,7 +1667,7 @@ function rowToLead(row) {
     productInterest: get('productInterest'), currentSupplier: get('currentSupplier'),
     estimatedVolumeLitres: get('estimatedVolumeLitres').replace(/[^0-9.]/g, ''),
     estimatedVolumePeriod: /ann|year/i.test(get('estimatedVolumePeriod')) ? 'annum' : 'month',
-    contactName: get('contactName'), contactRole: get('contactRole'), contactPhone: get('contactPhone'), contactEmail: get('contactEmail'),
+    contactName: get('contactName'), contactRole: get('contactRole'), contactPhone: get('contactPhone'), contactMobile: get('contactMobile'), contactEmail: get('contactEmail'),
     contact2Name: get('contact2Name'), contact2Role: get('contact2Role'), contact2Phone: get('contact2Phone'), contact2Email: get('contact2Email'),
     researchGrade: get('researchGrade').toUpperCase().slice(0, 1), researchWhy: get('researchWhy'), researchSource: get('researchSource'),
     activity: [], nextFollowUp: null, lostReason: null, createdDate: todayStr(), clientId: null
@@ -2165,7 +2194,7 @@ function addrKey(street, suburb) {
   const st = normKey(street);
   return st && !/^pobox/.test(st) ? st + '|' + normKey(suburb) : '';
 }
-function leadPhones(p) { return [p.contactPhone, p.contact2Phone].map(phoneKey).filter(Boolean); }
+function leadPhones(p) { return [p.contactPhone, p.contactMobile, p.contact2Phone].map(phoneKey).filter(Boolean); }
 // Compare a lead-like {company, suburb, state, streetAddress, phones} with another.
 function matchLevel(a, b) {
   const ka = coKey(a.company), kb = coKey(b.company);
@@ -2230,22 +2259,23 @@ function planMerge(keeper, src) {
   if (fills.streetAddress) { if (src.suburb) fills.suburb = src.suburb; if (src.postcode) fills.postcode = src.postcode; }
   if (fills.estimatedVolumeLitres) fills.estimatedVolumePeriod = src.estimatedVolumePeriod;
   // Contacts travel as a group, so a phone never lands against the wrong person.
-  const grp = (o, n) => ({ name: val(o, `contact${n}Name`), role: val(o, `contact${n}Role`), phone: val(o, `contact${n}Phone`), email: val(o, `contact${n}Email`) });
-  const put = (n, g) => { fills[`contact${n}Name`] = g.name; fills[`contact${n}Role`] = g.role; fills[`contact${n}Phone`] = g.phone; fills[`contact${n}Email`] = g.email; };
+  const grp = (o, n) => ({ name: val(o, `contact${n}Name`), role: val(o, `contact${n}Role`), phone: val(o, `contact${n}Phone`), email: val(o, `contact${n}Email`), mobile: n ? '' : val(o, 'contactMobile') });
+  const put = (n, g) => { fills[`contact${n}Name`] = g.name; fills[`contact${n}Role`] = g.role; fills[`contact${n}Phone`] = g.phone; fills[`contact${n}Email`] = g.email; if (!n) fills.contactMobile = g.mobile; else if (g.mobile) diffs.push(`${g.name || 'contact'} mobile: ${g.mobile}`); };
   const kSlots = [grp(keeper, ''), grp(keeper, '2')];
   [grp(src, ''), grp(src, '2')].forEach(g => {
-    if (!g.name && !g.phone && !g.email) return;
+    if (!g.name && !g.phone && !g.email && !g.mobile) return;
     const sameAs = kSlots.findIndex(k => (g.name && normKey(k.name) === normKey(g.name)) || (!g.name && g.phone && phoneKey(k.phone) === phoneKey(g.phone)));
     if (sameAs >= 0) {
       const k = kSlots[sameAs], n = sameAs ? '2' : '';
-      ['role', 'phone', 'email'].forEach(x => {
+      ['role', 'phone', 'email', 'mobile'].forEach(x => {
+        if (x === 'mobile' && n) { if (g.mobile) diffs.push(`${g.name || 'contact'} mobile: ${g.mobile}`); return; }
         if (g[x] && !k[x]) { fills[`contact${n}${x[0].toUpperCase() + x.slice(1)}`] = g[x]; k[x] = g[x]; adds.push(`${g.name || 'contact'} ${x}`); }
-        else if (g[x] && k[x] && x !== 'role' && (x === 'phone' ? phoneKey(g[x]) !== phoneKey(k[x]) : normKey(g[x]) !== normKey(k[x]))) diffs.push(`${g.name || 'contact'} ${x}: ${g[x]}`);
+        else if (g[x] && k[x] && x !== 'role' && (x === 'phone' || x === 'mobile' ? phoneKey(g[x]) !== phoneKey(k[x]) : normKey(g[x]) !== normKey(k[x]))) diffs.push(`${g.name || 'contact'} ${x}: ${g[x]}`);
       });
       return;
     }
-    const free = kSlots.findIndex(k => !k.name && !k.phone && !k.email);
-    if (free >= 0) { put(free ? '2' : '', g); kSlots[free] = { ...g }; adds.push(g.name ? `contact ${g.name}` : `phone ${g.phone}`); }
+    const free = kSlots.findIndex(k => !k.name && !k.phone && !k.email && !k.mobile);
+    if (free >= 0) { put(free ? '2' : '', g); kSlots[free] = { ...g }; adds.push(g.name ? `contact ${g.name}` : `phone ${g.phone || g.mobile}`); }
     else diffs.push(`contact: ${[g.name, g.role, g.phone, g.email].filter(Boolean).join(', ')}`);
   });
   return { fills, adds, diffs };
@@ -3889,6 +3919,41 @@ function cardHtml(p) {
           </select>
         </div>
       </div>
+      <div style="margin:12px 0 6px;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:rgba(255,255,255,0.35);">Site contact</div>
+      <div class="p-field-row">
+        <div>
+          <label>Name</label>
+          <input type="text" value="${escapeHtml(p.contactName||'')}" onchange="updateField('${p.id}','contactName',this.value)">
+        </div>
+        <div>
+          <label>Role</label>
+          <input type="text" value="${escapeHtml(p.contactRole||'')}" placeholder="e.g. Fleet Manager" onchange="updateField('${p.id}','contactRole',this.value)">
+        </div>
+      </div>
+      <div class="p-field-row">
+        <div>
+          <label>Mobile</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="text" value="${escapeHtml(p.contactMobile||'')}" onchange="updateField('${p.id}','contactMobile',this.value)" style="flex:1;">
+            <a href="#" onclick="callPhoneField(this);return false;" title="Call" style="flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(74,222,128,0.12);color:#4ADE80;text-decoration:none;font-size:15px;">\uD83D\uDCDE</a>
+          </div>
+        </div>
+        <div>
+          <label>Office phone</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="text" value="${escapeHtml(p.contactPhone||'')}" onchange="updateField('${p.id}','contactPhone',this.value)" style="flex:1;">
+            <a href="#" onclick="callPhoneField(this);return false;" title="Call" style="flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(74,222,128,0.12);color:#4ADE80;text-decoration:none;font-size:15px;">\uD83D\uDCDE</a>
+          </div>
+        </div>
+      </div>
+      <div class="p-field-row">
+        <div>
+          <label>Email</label>
+          <input type="text" value="${escapeHtml(p.contactEmail||'')}" onchange="updateField('${p.id}','contactEmail',this.value)">
+        </div>
+        <div></div>
+      </div>
+      ${p.contactName ? `<button class="qa-btn" style="width:100%;margin-bottom:4px;" onclick="saveContactVCard('${p.id}',1)">\uD83D\uDCC7 Save Site Contact to phone</button>` : ''}
       <div class="p-field-row">
         <div>
           <label>Street address</label>
@@ -3957,31 +4022,6 @@ function cardHtml(p) {
           </select>
         </div>
       </div>
-      <div style="margin:12px 0 6px;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:rgba(255,255,255,0.35);">Site contact</div>
-      <div class="p-field-row">
-        <div>
-          <label>Name</label>
-          <input type="text" value="${escapeHtml(p.contactName||'')}" onchange="updateField('${p.id}','contactName',this.value)">
-        </div>
-        <div>
-          <label>Role</label>
-          <input type="text" value="${escapeHtml(p.contactRole||'')}" placeholder="e.g. Fleet Manager" onchange="updateField('${p.id}','contactRole',this.value)">
-        </div>
-      </div>
-      <div class="p-field-row">
-        <div>
-          <label>Phone</label>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <input type="text" value="${escapeHtml(p.contactPhone||'')}" onchange="updateField('${p.id}','contactPhone',this.value)" style="flex:1;">
-            <a href="#" onclick="callPhoneField(this);return false;" title="Call" style="flex-shrink:0;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1.5px solid rgba(255,255,255,0.2);background:rgba(74,222,128,0.12);color:#4ADE80;text-decoration:none;font-size:15px;">\uD83D\uDCDE</a>
-          </div>
-        </div>
-        <div>
-          <label>Email</label>
-          <input type="text" value="${escapeHtml(p.contactEmail||'')}" onchange="updateField('${p.id}','contactEmail',this.value)">
-        </div>
-      </div>
-      ${p.contactName ? `<button class="qa-btn" style="width:100%;margin-bottom:4px;" onclick="saveContactVCard('${p.id}',1)">\uD83D\uDCC7 Save Site Contact to phone</button>` : ''}
       </div></div>
       ${secOpen(p, 2, 'Key decision maker &amp; other', contactsSummary(p))}
       <div style="margin:12px 0 6px;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:rgba(255,255,255,0.35);">Key decision maker (optional)</div>
@@ -4633,6 +4673,7 @@ function pickWho(name) {
 }
 initSwipe();
 render();
+updateConnDot();
 // Still signed in from earlier (within the hour): reconnect and pull the latest without a tap.
 if (tokenLive()) loadTracker();
 </script>
