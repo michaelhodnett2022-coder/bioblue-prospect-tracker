@@ -3967,9 +3967,9 @@ function cardHtml(p) {
         ${logTile(p, 'call', 'quickLogCall', '\u260E\uFE0F', 'Call made')}
         ${logTile(p, 'email', 'quickLogEmail', '\u2709\uFE0F', 'Email sent')}
         ${logTile(p, 'visit', 'quickLogVisit', '\uD83E\uDD1D', 'F2F visit')}
-        ${p.status === 'New Lead' ? `<button class="qa-btn promote" onclick="addToPipeline(['${p.id}'])">\u2192 Add to Pipeline</button>` : ''}
+        ${p.status === 'New Lead' ? `<button class="qa-btn" onclick="addToPipeline(['${p.id}'])">\u2192 Add to Pipeline</button>` : ''}
         ${p.status === 'Targeted' && !wasContacted(p) ? `<button class="qa-btn" onclick="backToCold('${p.id}')">\u2190 Back to Cold</button>` : ''}
-        <button class="qa-btn promote" onclick="generateQuote('${p.id}')">${p.clientId ? '\u2192 Open quote builder' : '\u2192 Generate quote'}</button>
+        <button class="qa-btn${p.clientId ? ' done' : ''}" onclick="generateQuote('${p.id}')">${p.clientId ? '\u2192 Open quote builder' : '\u2192 Generate quote'}</button>
         <button class="qa-btn" onclick="promoteToClient('${p.id}')">Complete client details</button>
         <button class="qa-btn lost" onclick="openLostModal('${p.id}')">Mark lost</button>
       </div>
@@ -4099,9 +4099,9 @@ const EMAIL_REST = "BioBlue also supplies onsite storage tanks to clients and pr
 const EMAIL_DEFAULTS = {
   'Michael Hodnett': {
     subject: 'AdBlue® Arrangement for {Company}',
-    National: `Good morning {FirstName},\n\n${EMAIL_P1.National}\n\n${EMAIL_REST}`,
-    WA: `Good morning {FirstName},\n\n${EMAIL_P1.WA}\n\n${EMAIL_REST}`,
-    NT: `Good morning {FirstName},\n\n${EMAIL_P1.NT}\n\n${EMAIL_REST}`,
+    National: `Hello {FirstName},\n\n${EMAIL_P1.National}\n\n${EMAIL_REST}`,
+    WA: `Hello {FirstName},\n\n${EMAIL_P1.WA}\n\n${EMAIL_REST}`,
+    NT: `Hello {FirstName},\n\n${EMAIL_P1.NT}\n\n${EMAIL_REST}`,
     followUpSubject: 'AdBlue® Arrangement for {Company}',
     followUp: ''
   }
