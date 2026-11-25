@@ -440,9 +440,10 @@ body.sheet-open { overflow:hidden; }
 </div>
 
 <div class="action-row">
-  <button class="act-btn act-green" onclick="openResearchModal()">&#128269; Research</button>
+  <!-- Research and Fill details quick buttons hidden for now (25 Nov 2026): both are in Tools > Admin.
+  <button class="act-btn act-green" onclick="openResearchModal()">&#128269; Research</button> -->
   <button class="act-btn act-blue" onclick="importFromDrive()">&#9729;&#65039; Import</button>
-  <button class="act-btn act-amber" id="missingAddrLink" onclick="openAddressModal()" style="display:none;">&#129513; Fill details</button>
+  <!-- <button class="act-btn act-amber" id="missingAddrLink" onclick="openAddressModal()" style="display:none;">&#129513; Fill details</button> -->
 </div>
 
 <div class="search-wrap">
@@ -566,20 +567,23 @@ body.sheet-open { overflow:hidden; }
     <div class="sheet-grip"></div>
     <div class="sheet-head"><h3>Tools</h3><button class="link-btn" onclick="closeSheet('toolsSheet')">Done</button></div>
     <div class="menu-group">Find leads</div>
-    <button class="menu-item" onclick="toolAction(openResearchModal)"><span class="mi-ico">&#128269;</span><span>Research an area<small>Claude finds new prospects and saves them to Drive</small></span></button>
     <button class="menu-item" onclick="toolAction(importFromDrive)"><span class="mi-ico">&#9729;&#65039;</span><span>Import from Drive<small>Bring in a Research Inbox sheet</small></span></button>
-    <button class="menu-item" onclick="toolAction(openAddressModal)"><span class="mi-ico">&#129513;</span><span id="toolsMissing">Fill missing details<small>Addresses and business types</small></span></button>
-    <button class="menu-item" onclick="toolAction(openDuplicates)"><span class="mi-ico">&#128257;</span><span>Find duplicates<small>Merge double-ups, and spot leads that are already BioBlue clients</small></span></button>
-    <button class="menu-item" onclick="toolAction(backfillCoords)"><span class="mi-ico">&#128205;</span><span>Place leads on the map<small>One-off: store map positions for leads that don't have one yet</small></span></button>
-    <button class="menu-item" onclick="toolAction(clearColdList)"><span class="mi-ico">&#129529;</span><span>Clear my Cold list<small>Start fresh: deletes untouched Cold leads so research can find them again</small></span></button>
-    <div class="menu-group">Backup import</div>
-    <button class="menu-item" onclick="toolAction(openPasteResearch)"><span class="mi-ico">&#128203;</span><span>Paste research<small>If Import from Drive won't open</small></span></button>
-    <button class="menu-item" onclick="toolAction(()=>document.getElementById('researchFileInput').click())"><span class="mi-ico">&#8679;</span><span>Import research file<small>An .xlsx or .csv saved on this device</small></span></button>
-    <input type="file" id="researchFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importResearchFile(this)">
     <div class="menu-group">App</div>
-    <button class="menu-item" onclick="toolAction(manualSave)"><span class="mi-ico">&#128190;</span><span>Save now<small>Edits already save automatically</small></span></button>
     <button class="menu-item" onclick="toolAction(forceRefresh)"><span class="mi-ico">&#10227;</span><span>Update app<small>Reload to the newest version</small></span></button>
     <a class="menu-item" href="https://michaelhodnett2022-coder.github.io/bioblue-field-tools"><span class="mi-ico">&#8249;</span><span>Field Tools Hub</span></a>
+    <button class="menu-item" onclick="toggleAdminTools()"><span class="mi-ico" id="adminChevron">&#9656;</span><span>Admin &ndash; do not use<small>Michael only: tools that merge or delete leads</small></span></button>
+    <div id="adminTools" style="display:none;">
+      <div class="menu-group">Admin</div>
+      <button class="menu-item" onclick="toolAction(openResearchModal)"><span class="mi-ico">&#128269;</span><span>Research an area<small>Claude finds new prospects and saves them to Drive</small><small>Needs Claude, with Drive connected to the BioBlue account</small></span></button>
+      <button class="menu-item" onclick="toolAction(openAddressModal)"><span class="mi-ico">&#129513;</span><span id="toolsMissing">Fill missing details<small>Addresses and business types</small><small>Needs Claude, with Drive connected to the BioBlue account</small></span></button>
+      <button class="menu-item" onclick="toolAction(openDuplicates)"><span class="mi-ico">&#128257;</span><span>Find duplicates<small>Merge double-ups, and spot leads that are already BioBlue clients</small></span></button>
+      <button class="menu-item" onclick="toolAction(clearColdList)"><span class="mi-ico">&#129529;</span><span>Clear my Cold list<small>Start fresh: deletes untouched Cold leads so research can find them again</small></span></button>
+      <button class="menu-item" onclick="toolAction(backfillCoords)"><span class="mi-ico">&#128205;</span><span>Place leads on the map<small>One-off: store map positions for leads that don't have one yet</small></span></button>
+      <button class="menu-item" onclick="toolAction(openPasteResearch)"><span class="mi-ico">&#128203;</span><span>Paste research<small>Backup import, if Import from Drive won't open</small></span></button>
+      <button class="menu-item" onclick="toolAction(()=>document.getElementById('researchFileInput').click())"><span class="mi-ico">&#8679;</span><span>Import research file<small>Backup import: an .xlsx or .csv saved on this device</small></span></button>
+      <input type="file" id="researchFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importResearchFile(this)">
+      <button class="menu-item" onclick="toolAction(manualSave)"><span class="mi-ico">&#128190;</span><span>Save now<small>Edits already save automatically</small></span></button>
+    </div>
   </div>
 </div>
 
@@ -587,6 +591,7 @@ body.sheet-open { overflow:hidden; }
   <div class="modal-box" style="max-width:440px;">
     <h3>Research an area</h3>
     <div style="font-size:11.5px;opacity:0.7;margin-bottom:10px;">Opens Claude with the full research request written for you, including every company already in the Tracker so they're left out. Tap send in Claude, then come back and use Import from Drive.</div>
+    <div style="font-size:11.5px;color:#fbbf24;margin-bottom:8px;">Needs Claude, with Drive connected to the BioBlue account.</div>
     <input type="text" id="researchArea" placeholder="Area, e.g. Hazelmere WA or Kalgoorlie to Leonora" style="width:100%;margin-bottom:8px;">
     <input type="text" id="researchFocus" placeholder="Focus (optional), e.g. bus operators and quarries" style="width:100%;">
     <div id="researchInfo" style="font-size:11px;opacity:0.6;margin-top:8px;"></div>
@@ -601,6 +606,7 @@ body.sheet-open { overflow:hidden; }
 <div class="modal-overlay" id="addressModal">
   <div class="modal-box" style="max-width:440px;">
     <h3>Fill missing details</h3>
+    <div style="font-size:11.5px;color:#fbbf24;margin-bottom:8px;">Needs Claude, with Drive connected to the BioBlue account.</div>
     <div id="addressModalInfo" style="font-size:12px;opacity:0.8;margin-bottom:10px;line-height:1.5;"></div>
     <div style="font-size:11.5px;opacity:0.6;">Claude saves the results to your Drive. Then tap Import from Drive and pick the "Details Update" sheet: matching cards get their address and business type, and go on the map.</div>
     <div class="modal-btn-row" style="margin-top:12px;">
@@ -2837,12 +2843,13 @@ COMPANIES (Ref | Company | needs | what the Tracker knows | website or source, i
 
 function updateMissingAddressLink() {
   const el = document.getElementById('missingAddrLink');
-  if (!el) return;
   const n = missingAddressLeads().length;
-  el.style.display = n ? '' : 'none';
-  el.innerHTML = `&#129513; Fill ${n}`;
+  if (el) {
+    el.style.display = n ? '' : 'none';
+    el.innerHTML = `&#129513; Fill ${n}`;
+  }
   const t = document.getElementById('toolsMissing');
-  if (t) t.innerHTML = `Fill missing details${n ? ` (${n})` : ''}<small>${n ? 'Leads missing an address or business type' : 'Nothing missing right now'}</small>`;
+  if (t) t.innerHTML = `Fill missing details${n ? ` (${n})` : ''}<small>${n ? 'Leads missing an address or business type' : 'Nothing missing right now'}</small><small>Needs Claude, with Drive connected to the BioBlue account</small>`;
 }
 
 function openAddressModal() {
@@ -3037,6 +3044,7 @@ function undoRemoveLead() {
 // =====================================================================
 // ---- Bottom sheets (Filters, Add new lead, Tools)
 function openSheet(id) {
+  if (id === 'toolsSheet') { document.getElementById('adminTools').style.display = 'none'; document.getElementById('adminChevron').innerHTML = '&#9656;'; }
   document.getElementById(id).classList.add('open');
   document.body.classList.add('sheet-open');
 }
@@ -3051,6 +3059,14 @@ function openNewLead() {
 // Tools menu: close the sheet, then run the action in the same tap (the
 // Drive picker and file chooser need to start from a real tap).
 function toolAction(fn) { closeSheet('toolsSheet'); fn(); }
+
+// ADMIN — a folder in Tools, closed every time Tools opens, holding the
+// tools that merge or delete leads. Not a lock: just out of the way.
+function toggleAdminTools() {
+  const el = document.getElementById('adminTools'), open = el.style.display === 'none';
+  el.style.display = open ? '' : 'none';
+  document.getElementById('adminChevron').innerHTML = open ? '&#9662;' : '&#9656;';
+}
 
 function addNewLead() {
   const company = document.getElementById('nlCompany').value.trim();
