@@ -416,6 +416,35 @@ body.sheet-open { overflow:hidden; }
 .menu-item .mi-ico { width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,0.08);display:inline-flex;align-items:center;justify-content:center;font-size:16px;flex:none; }
 .menu-item small { display:block;font-size:11.5px;font-weight:400;opacity:0.55;margin-top:1px; }
 .menu-group { font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:14px 4px 2px; }
+/* v1.3: email batch, Add to Pipeline multi-select, existing client */
+.p-top-right { display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none; }
+.email-tick, .pick-box { font-family:'DM Sans',sans-serif;font-size:11px;font-weight:700;padding:5px 9px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.25);background:transparent;color:rgba(255,255,255,0.75);cursor:pointer;white-space:nowrap; }
+.email-tick.on { background:#fbbf24;border-color:#fbbf24;color:#2a1a00; }
+.pick-box { font-size:15px;padding:2px 8px; }
+.pick-box.on { background:#64d2ff;border-color:#64d2ff;color:#001f3f; }
+.sel-row { text-align:right;margin:-2px 0 6px; }
+.email-pill { position:fixed;left:18px;bottom:calc(env(safe-area-inset-bottom) + 30px);z-index:70;display:none;border:none;border-radius:22px;padding:11px 16px;
+  background:#fbbf24;color:#2a1a00;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,0.35); }
+.email-pill.show { display:block; }
+.select-bar { position:fixed;left:12px;right:88px;bottom:calc(env(safe-area-inset-bottom) + 26px);z-index:75;display:none;align-items:center;gap:8px;
+  background:#0a2a4a;border:1px solid rgba(255,255,255,0.25);padding:9px 10px;border-radius:12px;font-size:12.5px;max-width:460px; }
+.select-bar.show { display:flex; }
+.select-bar span { flex:1; }
+.select-bar button { background:#64d2ff;color:#001f3f;border:none;border-radius:8px;padding:7px 10px;font-weight:800;font-size:12px;cursor:pointer;font-family:inherit; }
+.select-bar button.ghost { background:rgba(255,255,255,0.12);color:white; }
+.eb-card { background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:12px;margin:10px 0; }
+.eb-head { display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px; }
+.eb-head small { display:block;font-size:11px;opacity:0.6;margin-top:2px; }
+.eb-warn { font-size:11.5px;color:#fbbf24;margin:4px 0; }
+.eb-card label, #emailTplBody label { display:block;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:rgba(255,255,255,0.45);margin:8px 0 4px; }
+.sheet textarea { width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.07);color:white;
+  font-family:'DM Sans',sans-serif;font-size:14px;line-height:1.4;resize:vertical; }
+.eb-sent { display:flex;gap:8px;align-items:center;margin-top:10px;font-weight:700;font-size:13px; }
+.eb-sent .btn { flex:1;padding:10px; }
+.has-email { cursor:pointer; }
+.view-email { color:#64d2ff;font-weight:700;white-space:nowrap; }
+.tpl-reset { float:right;font-size:11px;font-weight:600;text-transform:none;letter-spacing:0; }
+.sent-pre { white-space:pre-wrap;font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.45;background:rgba(255,255,255,0.05);border-radius:12px;padding:12px;margin-top:8px; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -583,6 +612,7 @@ body.sheet-open { overflow:hidden; }
       <button class="menu-item" onclick="toolAction(openPasteResearch)"><span class="mi-ico">&#128203;</span><span>Paste research<small>Backup import, if Import from Drive won't open</small></span></button>
       <button class="menu-item" onclick="toolAction(()=>document.getElementById('researchFileInput').click())"><span class="mi-ico">&#8679;</span><span>Import research file<small>Backup import: an .xlsx or .csv saved on this device</small></span></button>
       <input type="file" id="researchFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="importResearchFile(this)">
+      <button class="menu-item" onclick="toolAction(openEmailTemplates)"><span class="mi-ico">&#9993;&#65039;</span><span>Email templates<small>Cold intro (National, WA, NT) and follow-up wording</small></span></button>
       <button class="menu-item" onclick="toolAction(manualSave)"><span class="mi-ico">&#128190;</span><span>Save now<small>Edits already save automatically</small></span></button>
     </div>
   </div>
@@ -640,6 +670,34 @@ body.sheet-open { overflow:hidden; }
 
 <div class="undo-bar" id="undoBar"><span id="undoText"></span><button onclick="undoRemoveLead()">Undo</button></div>
 
+<button class="email-pill" id="emailPill" onclick="openEmailTray()"></button>
+<div class="select-bar" id="selectBar"><span id="selectText"></span><button onclick="addPickedToPipeline()">Add to Pipeline</button><button class="ghost" onclick="toggleColdSelect()">Cancel</button></div>
+
+<div class="sheet-overlay" id="emailSheet" onclick="if(event.target===this)closeSheet('emailSheet')">
+  <div class="sheet">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h3>&#9993;&#65039; Email batch</h3><button class="link-btn" onclick="closeSheet('emailSheet')">Done</button></div>
+    <div style="font-size:11.5px;opacity:0.6;">Check each email here, then Send opens your mail app with it filled in. Your Outlook signature is added there.</div>
+    <div id="emailTrayList"></div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="emailTplSheet" onclick="if(event.target===this)closeSheet('emailTplSheet')">
+  <div class="sheet">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h3>Email templates</h3><button class="link-btn" onclick="closeSheet('emailTplSheet')">Close</button></div>
+    <div id="emailTplBody"></div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="sentEmailSheet" onclick="if(event.target===this)closeSheet('sentEmailSheet')">
+  <div class="sheet">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head"><h3>Email sent</h3><button class="link-btn" onclick="closeSheet('sentEmailSheet')">Done</button></div>
+    <div id="sentEmailBody"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="lostModal">
   <div class="modal-box">
     <h3>Mark as Lost</h3>
@@ -678,6 +736,7 @@ const GDRIVE_FOLDER_NAME = 'BioBlue Audits';
 const TRACKER_SUBFOLDER  = 'Prospect Tracker Data';
 const TRACKER_FILE_NAME  = 'BB_Prospect_Tracker.json';
 const ARCHIVE_FILE_NAME  = 'BB_Prospect_Tracker_Archive.json';
+const SETTINGS_FILE_NAME = 'BB_Prospect_Tracker_Settings.json';
 const PROSPECT_FORM_URL  = 'https://michaelhodnett2022-coder.github.io/bioblue-prospect';
 const QUOTE_BUILDER_URL  = 'https://michaelhodnett2022-coder.github.io/bioblue-quote';
 const PROSPECTS_FOLDER   = 'Prospects';
@@ -685,9 +744,9 @@ const CLIENTS_FOLDER     = 'Clients';
 const LOST_FOLDER        = 'Lost';
 const CLIENT_RECORDS_NAME= 'BioBlue_Client_Records.xlsx';
 
-const STATUS_ORDER  = ['New Lead','Contacted','Engaged','Quoted','Negotiating','Won','Lost'];
+const STATUS_ORDER  = ['New Lead','Targeted','Contacted','Engaged','Quoted','Negotiating','Won','Lost'];
 const STATUS_COLORS = {
-  'New Lead':'#94a3b8','Contacted':'#38bdf8','Engaged':'#4ADE80',
+  'New Lead':'#94a3b8','Targeted':'#818cf8','Contacted':'#38bdf8','Engaged':'#4ADE80',
   'Quoted':'#fbbf24','Negotiating':'#fb923c','Won':'#22c55e','Lost':'#f87171'
 };
 
@@ -1214,7 +1273,7 @@ async function generateQuote(id) {
       await ensureToken();
       showToast('Setting up client record...');
       p.clientId = await mintClientId(p);
-      if (p.status === 'New Lead' || p.status === 'Contacted') p.status = 'Engaged';
+      if (p.status === 'New Lead' || p.status === 'Targeted' || p.status === 'Contacted') p.status = 'Engaged';
       saveTracker();
     }
     window.location.href = `${QUOTE_BUILDER_URL}/?client=${encodeURIComponent(p.clientId)}&name=${encodeURIComponent(p.company)}`;
@@ -1258,7 +1317,7 @@ async function getTrackerFileId() {
 // The first time the archive is created, a backup copy of the main file
 // is saved alongside it before anything moves.
 // =====================================================================
-function isArchivable(p) { return p.status === 'Lost' || p.status === THROWN_BACK; }
+function isArchivable(p) { return p.status === 'Lost' || p.status === THROWN_BACK || p.status === EXISTING_CLIENT; }
 function allLeads() { return archiveLoaded ? prospects.concat(archive) : prospects; }
 
 async function findTrackerFolderFile(name) {
@@ -1383,6 +1442,7 @@ async function loadTracker() {
     await fetchAndMergeProspects();
     setSaveStatus('saved', 'Connected \u2014 edits save automatically');
     if (clientNamesCache.date !== todayStr()) loadClientNames().catch(() => {});
+    ensureSettingsLoaded().catch(() => {});
   } catch (e) {
     setAuthStatus('\u274C ' + e.message);
     setSaveStatus('error', 'Not connected \u2014 tap Load to retry');
@@ -1476,8 +1536,11 @@ async function manualSave() {
 // Notes Log.
 // =====================================================================
 const THROWN_BACK = 'Thrown back';
+// Already a BioBlue client: archived (kept out of research), not a sales outcome.
+const EXISTING_CLIENT = 'Existing client';
 const IMPORT_SHEET = 'Tracker Import';
-const PIPELINE_STATUSES = ['Contacted','Engaged','Quoted','Negotiating','Won'];
+// Targeted = put on the Pipeline by hand, no contact made yet.
+const PIPELINE_STATUSES = ['Targeted','Contacted','Engaged','Quoted','Negotiating','Won'];
 
 function normKey(s) { return (s || '').toString().toLowerCase().replace(/[^a-z0-9]/g, ''); }
 function leadKey(company, suburb) { return normKey(company) + '|' + normKey(suburb); }
@@ -1579,8 +1642,8 @@ async function importResearchRows(rows, sourceLabel) {
       if (same) {
         const m = same.p;
         const inFile = kept.includes(m) || thrown.includes(m) || merges.some(x => x.keeper === m);
-        if (inFile || m.status === THROWN_BACK || m.status === REMOVED || m.status === 'Lost' || !keep) {
-          skipped.push(`${p.company} (${inFile ? 'twice in this file' : m.status === THROWN_BACK ? 'marked N before' : m.status === REMOVED ? 'removed before' : m.status === 'Lost' ? 'marked Lost' : 'already in Tracker'})`);
+        if (inFile || m.status === THROWN_BACK || m.status === REMOVED || m.status === 'Lost' || m.status === EXISTING_CLIENT || !keep) {
+          skipped.push(`${p.company} (${inFile ? 'twice in this file' : m.status === THROWN_BACK ? 'marked N before' : m.status === REMOVED ? 'removed before' : m.status === 'Lost' ? 'marked Lost' : m.status === EXISTING_CLIENT ? 'already a BioBlue client' : 'already in Tracker'})`);
           return;
         }
         const plan = planMerge(m, p);
@@ -2091,8 +2154,8 @@ function findClientMatch(sig, sigs) {
   }
   return possible;
 }
-const STATUS_RANK = { 'Won': 6, 'Negotiating': 5, 'Quoted': 4, 'Engaged': 3, 'Contacted': 2, 'New Lead': 1, 'Lost': 0 };
-const AUTO_NOTE_RE = /^(Imported from research|Street address added from research|Marked N on research import|Details merged)/;
+const STATUS_RANK = { 'Won': 6, 'Negotiating': 5, 'Quoted': 4, 'Engaged': 3, 'Contacted': 2, 'Targeted': 1.5, 'New Lead': 1, 'Lost': 0 };
+const AUTO_NOTE_RE = /^(Imported from research|Street address added from research|Marked N on research import|Details merged|Added to pipeline|Back to Cold)/;
 function realActivity(p) { return (p.activity || []).filter(a => a.type !== 'note' || !AUTO_NOTE_RE.test(a.text || '')).length; }
 function pickKeeper(a, b) {
   const score = p => [STATUS_RANK[p.status] ?? -1, p.clientId ? 1 : 0, realActivity(p)];
@@ -2508,7 +2571,7 @@ function setColdSort(v) { coldSort = COLD_SORT_LABELS[v] ? v : 'oldest'; render(
 // clears itself overnight and BDMs never see each other's plans.
 // =====================================================================
 function isPlannedToday(p) {
-  return p.planDate === todayStr() && p.planBy === currentBDM && p.status !== REMOVED && p.status !== THROWN_BACK;
+  return p.planDate === todayStr() && p.planBy === currentBDM && p.status !== REMOVED && p.status !== THROWN_BACK && p.status !== EXISTING_CLIENT;
 }
 function togglePlan(id) {
   const p = findProspect(id);
@@ -3015,11 +3078,11 @@ function confirmRemoveLead() {
   render();
   showUndo(p, prevStatus);
 }
-function showUndo(p, prevStatus) {
+function showUndo(p, prevStatus, label, kind) {
   if (_undoRemove) clearTimeout(_undoRemove.timer);
-  document.getElementById('undoText').textContent = `${p.company} removed`;
+  document.getElementById('undoText').textContent = `${p.company} ${label || 'removed'}`;
   document.getElementById('undoBar').classList.add('show');
-  _undoRemove = { id: p.id, prevStatus, timer: setTimeout(hideUndo, 8000) };
+  _undoRemove = { id: p.id, prevStatus, kind: kind || 'remove', timer: setTimeout(hideUndo, 8000) };
 }
 function hideUndo() {
   document.getElementById('undoBar').classList.remove('show');
@@ -3029,8 +3092,10 @@ function undoRemoveLead() {
   if (!_undoRemove) return;
   const p = findProspect(_undoRemove.id);
   const prevStatus = _undoRemove.prevStatus;
+  const kind = _undoRemove.kind;
   clearTimeout(_undoRemove.timer);
   hideUndo();
+  if (kind === 'client') { undoExistingClient(p, prevStatus); return; }
   if (!p || p.status !== REMOVED) return;
   p.status = prevStatus;
   delete p.removedReason; delete p.removedDate;
@@ -3165,8 +3230,8 @@ function logActivity(id, type, text) {
   p.activity.push({ date: todayStr(), type, text });
   // Bump New Lead -> Contacted automatically on first real activity.
   const wasCold = p.status === 'New Lead';
-  if (type === 'visit' && (p.status === 'New Lead' || p.status === 'Contacted')) p.status = 'Engaged';
-  else if (p.status === 'New Lead' && (type === 'email' || type === 'call')) p.status = 'Contacted';
+  if (type === 'visit' && (p.status === 'New Lead' || p.status === 'Targeted' || p.status === 'Contacted')) p.status = 'Engaged';
+  else if ((p.status === 'New Lead' || p.status === 'Targeted') && (type === 'email' || type === 'call')) p.status = 'Contacted';
   // Suggest next follow-up 7 days out unless one is already set in the future.
   const suggested = addDays(todayStr(), 7);
   if (!p.nextFollowUp || p.nextFollowUp < todayStr()) p.nextFollowUp = suggested;
@@ -3689,15 +3754,17 @@ function cardHtml(p) {
   const bucket = bucketFor(p);
   const followUpClass = bucket === 'overdue' ? 'overdue' : bucket === 'today' ? 'today' : bucket === 'nodate' ? 'nodate' : 'upcoming';
   const ageDays = p.createdDate ? daysBetween(p.createdDate, todayStr()) : null;
-  const followUpLabel = p.status === 'New Lead'
+  const followUpLabel = p.status === 'Targeted' && !p.nextFollowUp
+    ? 'Targeted \u2014 not contacted yet'
+    : p.status === 'New Lead'
     ? `Not contacted yet${ageDays === null ? '' : ageDays === 0 ? ' \u2014 added today' : ` \u2014 added ${ageDays} day${ageDays !== 1 ? 's' : ''} ago`}`
     : p.nextFollowUp
     ? (bucket === 'overdue' ? `Overdue by ${daysBetween(p.nextFollowUp, todayStr())} day${daysBetween(p.nextFollowUp, todayStr())!==1?'s':''}` : bucket === 'today' ? 'Due today' : 'Due ' + fmtDate(p.nextFollowUp))
     : (p.createdDate ? `No follow-up set \u2014 added ${daysBetween(p.createdDate, todayStr())} day${daysBetween(p.createdDate, todayStr())!==1?'s':''} ago` : 'No follow-up set');
-  const activityHtml = (p.activity || []).slice().reverse().map(a => `
-    <div class="activity-entry">
+  const activityHtml = (p.activity || []).map((a, i) => ({ a, i })).reverse().map(({ a, i }) => `
+    <div class="activity-entry${a.email ? ' has-email' : ''}"${a.email ? ` onclick="viewSentEmail('${p.id}',${i})"` : ''}>
       <div class="activity-date">${fmtDate(a.date)}</div>
-      <div class="activity-text">${escapeHtml(a.text)}</div>
+      <div class="activity-text">${escapeHtml(a.text)}${a.email ? ' <span class="view-email">View email &rsaquo;</span>' : ''}</div>
     </div>`).join('') || '<div class="empty-note">No activity logged yet</div>';
 
   const bt = typeInfo(p.businessType);
@@ -3714,7 +3781,7 @@ function cardHtml(p) {
         ${nearDist.has(p.id) ? `<div class="near-line">${nearDist.get(p.id) < 10 ? nearDist.get(p.id).toFixed(1) : Math.round(nearDist.get(p.id))} km away<a href="${directionsUrl(p)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Directions</a></div>` : ''}
         <div class="p-followup ${followUpClass}">${followUpLabel}</div>
       </div>
-      ${p.status === 'New Lead' ? '' : `<div class="p-status-badge">${p.status}</div>`}
+      <div class="p-top-right">${p.status === 'New Lead' ? '' : `<div class="p-status-badge">${p.status}</div>`}${cardTopButtons(p)}</div>
     </div>
     <div class="p-detail" id="detail-${p.id}">
       <div class="p-field-row">
@@ -3895,6 +3962,8 @@ function cardHtml(p) {
         <button class="qa-btn" onclick="quickLogCall('${p.id}')">\u260E\uFE0F Call made</button>
         <button class="qa-btn" onclick="quickLogEmail('${p.id}')">\u2709\uFE0F Email sent</button>
         <button class="qa-btn" onclick="quickLogVisit('${p.id}')">\uD83E\uDD1D F2F visit</button>
+        ${p.status === 'New Lead' ? `<button class="qa-btn promote" onclick="addToPipeline(['${p.id}'])">\u2192 Add to Pipeline</button>` : ''}
+        ${p.status === 'Targeted' && !wasContacted(p) ? `<button class="qa-btn" onclick="backToCold('${p.id}')">\u2190 Back to Cold</button>` : ''}
         <button class="qa-btn promote" onclick="generateQuote('${p.id}')">${p.clientId ? '\u2192 Open quote builder' : '\u2192 Generate quote'}</button>
         <button class="qa-btn" onclick="promoteToClient('${p.id}')">Complete client details</button>
         <button class="qa-btn lost" onclick="openLostModal('${p.id}')">Mark lost</button>
@@ -3906,11 +3975,388 @@ function cardHtml(p) {
       </div>
       ${p.lostReason ? `<div class="lost-reason-tag">Lost — ${escapeHtml(p.lostReason)}</div>` : ''}
       ${p.status === 'Won' && p.clientId ? `<div style="font-size:11px;color:#4ADE80;margin-top:8px;">Won \u2014 client details are now kept in the Prospect/Client form. Edits here no longer update Client Records.</div>` : ''}
-      <div class="remove-row">${p.clientId
+      <div class="remove-row">${canMarkExistingClient(p) ? `<button class="remove-link" style="color:#64d2ff;margin-right:14px;" onclick="markExistingClient('${p.id}')">Already a BioBlue client</button>` : ''}${p.clientId
         ? `<span class="remove-blocked">Can't be removed \u2014 it has a Client ID (${escapeHtml(p.clientId)}) and history. Mark it Lost instead.</span>`
         : `<button class="remove-link" onclick="openRemoveModal('${p.id}')">Remove from Tracker</button>`}</div>
     </div>
   </div>`;
+}
+
+// =====================================================================
+// v1.3 — ADD TO PIPELINE / BACK TO COLD, ALREADY A CLIENT, EMAIL BATCH
+// =====================================================================
+// Contacted = a status from Contacted onward, or any logged call, email or visit.
+function wasContacted(p) {
+  return ['Contacted', 'Engaged', 'Quoted', 'Negotiating', 'Won'].includes(p.status) ||
+    (p.activity || []).some(a => a.type === 'call' || a.type === 'email' || a.type === 'visit');
+}
+
+// ---- Add to Pipeline: untouched Cold lead -> Targeted, with a Note only
+// (the note is not counted as a contact anywhere: see AUTO_NOTE_RE).
+let coldSelect = false;
+const coldPicked = new Set();
+function addToPipeline(ids) {
+  const moved = [];
+  ids.forEach(id => {
+    const p = findProspect(id);
+    if (!p || p.status !== 'New Lead') return;
+    if (!p.activity) p.activity = [];
+    p.status = 'Targeted';
+    p.pipelineAddedDate = todayStr();
+    p.activity.push({ date: todayStr(), type: 'note', text: `Added to pipeline — no contact yet (${currentBDM})` });
+    moved.push(p);
+  });
+  if (!moved.length) { showToast('Nothing to add — only Cold leads can be added'); return; }
+  saveTracker();
+  render();
+  showToast(moved.length === 1 ? `${moved[0].company} added to Pipeline (Targeted)` : `✅ ${moved.length} leads added to Pipeline (Targeted)`);
+}
+function backToCold(id) {
+  const p = findProspect(id);
+  if (!p || p.status !== 'Targeted' || wasContacted(p)) return;
+  if (!p.activity) p.activity = [];
+  p.status = 'New Lead';
+  delete p.pipelineAddedDate;
+  p.activity.push({ date: todayStr(), type: 'note', text: `Back to Cold — no contact yet (${currentBDM})` });
+  saveTracker();
+  render();
+  showToast(`${p.company} moved back to Cold`);
+}
+function toggleColdSelect() {
+  coldSelect = !coldSelect;
+  coldPicked.clear();
+  render();
+}
+function togglePick(id) {
+  if (coldPicked.has(id)) coldPicked.delete(id); else coldPicked.add(id);
+  render();
+}
+function addPickedToPipeline() {
+  if (!coldPicked.size) { showToast('Tick the leads to add first'); return; }
+  const ids = [...coldPicked];
+  coldSelect = false;
+  coldPicked.clear();
+  addToPipeline(ids);
+}
+
+// ---- Already a BioBlue client: archived with its own status, so it leaves
+// Cold and Pipeline, stays out of research, and doesn't touch Won/Lost.
+// No Client ID and no Client Records write.
+function canMarkExistingClient(p) {
+  return !p.clientId && (p.status === 'New Lead' || (PIPELINE_STATUSES.includes(p.status) && p.status !== 'Won'));
+}
+function markExistingClient(id) {
+  const p = findProspect(id);
+  if (!p || !canMarkExistingClient(p)) return;
+  if (!confirm(`Mark "${p.company}" as already a BioBlue client?\n\nIt leaves Cold and Pipeline, moves to the archive, and research won't suggest it again. Nothing is written to Client Records.`)) return;
+  if (!p.activity) p.activity = [];
+  const prevStatus = p.status;
+  p.status = EXISTING_CLIENT;
+  p.existingClientDate = todayStr();
+  delete p.planDate; delete p.planBy; delete p.planAt;
+  delete p.emailBy; delete p.emailAt; delete emailDrafts[p.id];
+  coldPicked.delete(p.id);
+  p.activity.push({ date: todayStr(), type: 'note', text: `Marked as an existing BioBlue client by ${currentBDM}` });
+  saveTracker();
+  render();
+  showUndo(p, prevStatus, 'marked as an existing client', 'client');
+}
+function undoExistingClient(p, prevStatus) {
+  if (!p || p.status !== EXISTING_CLIENT) return;
+  p.status = prevStatus;
+  delete p.existingClientDate;
+  p.activity.push({ date: todayStr(), type: 'note', text: `Existing client mark undone by ${currentBDM}` });
+  saveTracker();
+  render();
+  showToast(`${p.company} restored`);
+}
+
+// ---- Email batch. Templates live in BB_Prospect_Tracker_Settings.json (same
+// folder), keyed by BDM; Michael only for now. Built-in defaults are used
+// until a template is edited and saved. No signature: Outlook adds it.
+const EMAIL_P1 = {
+  National: "I represent BioBlue Australia, one of the country's leading AdBlue® suppliers. We operate right across Australia, with production plants in every state and the Northern Territory servicing our clients nationally. Our AdBlue® is made to ISO 22241 and is VDA certified to the highest standard.",
+  WA: "I represent BioBlue Australia, one of the country's leading AdBlue® suppliers. We operate right across Australia and have a production plant here in Perth that services our clients across all of WA. Our AdBlue® is made to ISO 22241 and is VDA certified to the highest standard.",
+  NT: "I represent BioBlue Australia, one of the country's leading AdBlue® suppliers. We operate right across Australia and have a production plant in Darwin that services our clients across the NT. We are one of only two AdBlue® manufacturers in the Territory. Our AdBlue® is made to ISO 22241 and is VDA certified to the highest standard."
+};
+const EMAIL_REST = "BioBlue also supplies onsite storage tanks to clients and provides full support and maintenance as part of our complete service philosophy.\n\n" +
+  "I would like to discuss the AdBlue® needs of {Company} with you, as I believe BioBlue can offer a favourable supply arrangement in terms of both pricing and service, or at the very least, provide you with a reliable \"back up\" supply option.\n\n" +
+  "Please let me know if you would be keen to see some pricing, tailored specifically to your usage and needs.\n\n" +
+  "Kind Regards,";
+const EMAIL_DEFAULTS = {
+  'Michael Hodnett': {
+    subject: 'AdBlue® supply for {Company}',
+    National: `Good morning {FirstName},\n\n${EMAIL_P1.National}\n\n${EMAIL_REST}`,
+    WA: `Good morning {FirstName},\n\n${EMAIL_P1.WA}\n\n${EMAIL_REST}`,
+    NT: `Good morning {FirstName},\n\n${EMAIL_P1.NT}\n\n${EMAIL_REST}`,
+    followUpSubject: 'AdBlue® supply for {Company}',
+    followUp: ''
+  }
+};
+const EMAIL_TPL_FIELDS = [
+  ['subject', 'Subject (cold intro)', 1], ['National', 'Cold intro — National', 14], ['WA', 'Cold intro — WA', 14], ['NT', 'Cold intro — NT', 14],
+  ['followUpSubject', 'Subject (follow-up)', 1], ['followUp', 'Follow-up email', 10]
+];
+let trackerSettings = null, settingsFileId = null, _settingsPromise = null;
+const emailDrafts = {};   // id -> { to, name, tpl, subject, body, edited, pending }
+
+async function loadSettings() {
+  if (!(await ensureConnected())) throw new Error('Not connected to Drive');
+  const id = await findTrackerFolderFile(SETTINGS_FILE_NAME);
+  let data = {};
+  if (id) {
+    const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+    if (!dl.ok) throw new Error('Settings fetch failed (' + dl.status + ')');
+    const text = await dl.text();
+    data = text.trim() ? JSON.parse(text) : {};
+  }
+  trackerSettings = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  settingsFileId = id;
+}
+function ensureSettingsLoaded() {
+  if (trackerSettings) return Promise.resolve();
+  if (!_settingsPromise) _settingsPromise = loadSettings().finally(() => { _settingsPromise = null; });
+  return _settingsPromise;
+}
+async function saveSettings() {
+  await ensureSettingsLoaded();
+  if (!settingsFileId) settingsFileId = await findTrackerFolderFile(SETTINGS_FILE_NAME);
+  if (!settingsFileId) {
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify({ name: SETTINGS_FILE_NAME, parents: [trackerFolderId] })], { type: 'application/json' }));
+    form.append('file', new Blob([JSON.stringify(trackerSettings)], { type: 'application/json' }));
+    const cr = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+      method: 'POST', headers: { Authorization: `Bearer ${gdriveToken}` }, body: form
+    });
+    if (!cr.ok) throw new Error('Could not create the settings file (' + cr.status + ')');
+    settingsFileId = (await cr.json()).id;
+  } else {
+    await writeJsonFile(settingsFileId, trackerSettings);
+  }
+}
+function emailTpl(bdm) {
+  const d = EMAIL_DEFAULTS[bdm];
+  const s = trackerSettings && trackerSettings.email && trackerSettings.email[bdm];
+  if (!d && !s) return null;
+  return Object.assign({}, d || {}, s || {});
+}
+function emailEnabledFor(p) {
+  return !!emailTpl(currentBDM) && p.bdm === currentBDM &&
+    (p.status === 'New Lead' || (PIPELINE_STATUSES.includes(p.status) && p.status !== 'Won'));
+}
+function inEmailBatch(p) { return p.emailBy === currentBDM && emailEnabledFor(p); }
+function emailBatchList() { return prospects.filter(inEmailBatch).sort((a, b) => (a.emailAt || 0) - (b.emailAt || 0)); }
+
+// To: key decision maker, then site contact, then other. Greeting: first name
+// of whoever's email is used; a general inbox with no name -> key decision maker.
+function emailRecipient(p) {
+  const first = n => (n || '').trim().split(/\s+/)[0] || '';
+  const hit = [[p.contact2Email, p.contact2Name], [p.contactEmail, p.contactName], [p.contact3Email, p.contact3Name]].find(o => (o[0] || '').trim());
+  if (!hit) return { to: '', name: first(p.contact2Name) || first(p.contactName) || first(p.contact3Name) };
+  return { to: hit[0].trim(), name: first(hit[1]) || first(p.contact2Name) };
+}
+function stateTplKey(p) { return p.state === 'WA' ? 'WA' : p.state === 'NT' ? 'NT' : 'National'; }
+function followUpReady() { const t = emailTpl(currentBDM); return !!(t && (t.followUp || '').trim()); }
+function fillEmail(p, d) {
+  const t = emailTpl(currentBDM) || {};
+  const fu = d.tpl === 'FollowUp';
+  const fill = s => (s || '').replace(/\{FirstName\}/g, d.name || '').replace(/\{Company\}/g, p.company || '').replace(/\{Signature\}/g, '').replace(/\s+$/, '');
+  d.subject = fill(fu ? (t.followUpSubject || t.subject) : t.subject);
+  d.body = fill(fu ? t.followUp : t[d.tpl]);
+  d.edited = false;
+}
+function emailDraft(p) {
+  if (!emailDrafts[p.id]) {
+    const r = emailRecipient(p);
+    const d = { to: r.to, name: r.name, tpl: stateTplKey(p), pending: false };
+    fillEmail(p, d);
+    emailDrafts[p.id] = d;
+  }
+  return emailDrafts[p.id];
+}
+function toggleEmailBatch(id) {
+  const p = findProspect(id);
+  if (!p) return;
+  if (inEmailBatch(p)) {
+    delete p.emailBy; delete p.emailAt; delete emailDrafts[id];
+    showToast(`${p.company} taken out of the email batch`);
+  } else {
+    if (!emailEnabledFor(p)) return;
+    p.emailBy = currentBDM; p.emailAt = Date.now();
+    const r = emailRecipient(p), miss = [];
+    if (!r.to) miss.push('no email address');
+    if (!r.name) miss.push('no named person');
+    const n = emailBatchList().length;
+    showToast(miss.length ? `⚠️ ${p.company}: ${miss.join(' and ')} — added (${n}), but Send stays off until fixed` : `✉️ ${p.company} added to the email batch (${n})`);
+  }
+  saveTracker();
+  render();
+}
+function updateBatchBars() {
+  const n = emailBatchList().length;
+  const sel = coldSelect && viewMode === 'cold';
+  const pill = document.getElementById('emailPill');
+  pill.textContent = `✉️ Email batch · ${n}`;
+  pill.classList.toggle('show', n > 0 && !sel);
+  document.getElementById('selectBar').classList.toggle('show', sel);
+  document.getElementById('selectText').textContent = `${coldPicked.size} selected`;
+}
+function cardTopButtons(p) {
+  let h = '';
+  if (emailEnabledFor(p)) {
+    const on = inEmailBatch(p);
+    h += `<button class="email-tick${on ? ' on' : ''}" onclick="event.stopPropagation();toggleEmailBatch('${p.id}')">${on ? '&#10003; Email' : '&#9993; Email'}</button>`;
+  }
+  if (coldSelect && viewMode === 'cold' && p.status === 'New Lead') {
+    const on = coldPicked.has(p.id);
+    h += `<button class="pick-box${on ? ' on' : ''}" onclick="event.stopPropagation();togglePick('${p.id}')">${on ? '&#9745;' : '&#9744;'}</button>`;
+  }
+  return h;
+}
+
+async function openEmailTray() {
+  try { await ensureSettingsLoaded(); } catch (e) { showToast('⚠️ Could not load saved templates — using the defaults'); }
+  renderEmailTray();
+  openSheet('emailSheet');
+}
+function renderEmailTray() {
+  const list = emailBatchList();
+  const el = document.getElementById('emailTrayList');
+  if (!list.length) { el.innerHTML = '<div class="empty-note">No leads in the batch. Tap ✉ Email on a Cold or Pipeline card to add one.</div>'; return; }
+  const fuReady = followUpReady();
+  el.innerHTML = list.map(p => {
+    const d = emailDraft(p);
+    const contacted = wasContacted(p);
+    const warn = [];
+    if (!d.to || !d.to.includes('@')) warn.push('No email address — add one above or on the lead.');
+    if (!d.name) warn.push('No named person — type the greeting name.');
+    const canSend = !warn.length && d.body.trim();
+    const fuLabel = !contacted ? 'Follow-up (not contacted yet)' : !fuReady ? 'Follow-up wording not set' : 'Follow-up';
+    const opt = (v, label, dis) => `<option value="${v}"${d.tpl === v ? ' selected' : ''}${dis ? ' disabled' : ''}>${label}</option>`;
+    return `<div class="eb-card">
+      <div class="eb-head"><div><b>${escapeHtml(p.company)}</b><small>${[p.suburb, p.state, p.status === 'New Lead' ? 'Cold' : p.status].filter(Boolean).map(escapeHtml).join(' · ')}</small></div>
+        <button class="link-btn" onclick="toggleEmailBatch('${p.id}');renderEmailTray();">Remove</button></div>
+      ${warn.map(w => `<div class="eb-warn">⚠️ ${w}</div>`).join('')}
+      <div class="sheet-row"><div style="flex:1.4;"><label>To</label><input type="text" value="${escapeHtml(d.to)}" onchange="ebSet('${p.id}','to',this.value)"></div>
+        <div style="flex:1;"><label>Greeting name</label><input type="text" value="${escapeHtml(d.name)}" onchange="ebSet('${p.id}','name',this.value)"></div></div>
+      <label>Template</label>
+      <select onchange="ebSet('${p.id}','tpl',this.value)">${opt('National', 'Cold intro — National')}${opt('WA', 'Cold intro — WA')}${opt('NT', 'Cold intro — NT')}${opt('FollowUp', fuLabel, !contacted || !fuReady)}</select>
+      <label>Subject</label><input type="text" value="${escapeHtml(d.subject)}" oninput="ebEdit('${p.id}','subject',this.value)">
+      <label>Email</label><textarea rows="12" oninput="ebEdit('${p.id}','body',this.value)">${escapeHtml(d.body)}</textarea>
+      ${d.pending
+        ? `<div class="eb-sent"><span>Sent?</span><button class="btn btn-primary" onclick="ebSentYes('${p.id}')">Yes</button><button class="btn btn-ghost" onclick="ebSentNo('${p.id}')">No</button></div>`
+        : `<button class="btn btn-primary sheet-done" style="margin-top:10px;${canSend ? '' : 'opacity:0.4;'}" ${canSend ? '' : 'disabled'} onclick="ebSend('${p.id}')">Send → opens your mail app</button>`}
+    </div>`;
+  }).join('');
+}
+// To / greeting / template: re-fill from the template (asks first if the text was edited).
+function ebSet(id, field, value) {
+  const p = findProspect(id), d = emailDrafts[id];
+  if (!p || !d) return;
+  value = (value || '').trim();
+  if (field === 'to') { d.to = value; renderEmailTray(); return; }
+  if (d.edited && !confirm('Replace your edits to this email with the template text?')) {
+    if (field === 'name') d.name = value;
+    renderEmailTray();
+    return;
+  }
+  d[field] = value;
+  fillEmail(p, d);
+  renderEmailTray();
+}
+function ebEdit(id, field, value) {
+  const d = emailDrafts[id];
+  if (!d) return;
+  d[field] = value;
+  d.edited = true;
+}
+function ebSend(id) {
+  const p = findProspect(id), d = emailDrafts[id];
+  if (!p || !d) return;
+  if (!d.to.includes('@') || !d.name || !d.body.trim()) { renderEmailTray(); return; }
+  const enc = s => encodeURIComponent(s);
+  const to = d.to.split(/[;,\s]+/).filter(Boolean).map(a => enc(a).replace(/%40/g, '@')).join(',');
+  const url = `mailto:${to}?subject=${enc(d.subject)}&body=${enc(d.body.replace(/\r?\n/g, '\r\n'))}`;
+  d.pending = true;
+  renderEmailTray();
+  window.location.href = url;
+}
+function ebSentYes(id) {
+  const p = findProspect(id), d = emailDrafts[id];
+  if (!p || !d) return;
+  if (!p.activity) p.activity = [];
+  const text = `Email sent — ${d.tpl === 'FollowUp' ? 'Follow-up email' : 'Cold intro email'}`;
+  const wasCold = p.status === 'New Lead';
+  p.activity.push({ date: todayStr(), type: 'email', text, email: { to: d.to, subject: d.subject, body: d.body, date: todayStr(), template: d.tpl } });
+  if (p.status === 'New Lead' || p.status === 'Targeted') p.status = 'Contacted';
+  p.nextFollowUp = addDays(todayStr(), 7);
+  delete p.emailBy; delete p.emailAt; delete emailDrafts[id];
+  saveTracker();
+  render();
+  renderEmailTray();
+  if (!emailBatchList().length) closeSheet('emailSheet');
+  showToast(`✅ ${p.company}: email logged${wasCold ? ', moved to Pipeline (Contacted)' : ''}, follow-up ${fmtDate(p.nextFollowUp)}`);
+  syncActivityToNotesLog(p, text);
+}
+function ebSentNo(id) {
+  const d = emailDrafts[id];
+  if (d) d.pending = false;
+  renderEmailTray();
+}
+// Back from the mail app: bring the batch up so Sent? can be answered.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!Object.values(emailDrafts).some(d => d.pending)) return;
+  if (!document.getElementById('emailSheet').classList.contains('open')) { renderEmailTray(); openSheet('emailSheet'); }
+  showToast('Sent? Tap Yes or No on the card');
+});
+function viewSentEmail(id, idx) {
+  const p = findProspect(id);
+  const a = p && p.activity && p.activity[idx];
+  if (!a || !a.email) return;
+  const e = a.email;
+  document.getElementById('sentEmailBody').innerHTML =
+    `<div style="font-size:12.5px;line-height:1.6;"><b>${escapeHtml(p.company)}</b> · ${fmtDate(e.date || a.date)}<br>To: ${escapeHtml(e.to)}<br>Subject: ${escapeHtml(e.subject)}</div>` +
+    `<div class="sent-pre">${escapeHtml(e.body)}</div>`;
+  openSheet('sentEmailSheet');
+}
+
+// ---- Template editor (Admin): plain text areas, Reset per template.
+async function openEmailTemplates() {
+  try { await ensureSettingsLoaded(); } catch (e) { showToast('⚠️ Could not load saved templates — ' + e.message); return; }
+  const t = emailTpl(currentBDM);
+  const body = document.getElementById('emailTplBody');
+  body.innerHTML = !t
+    ? `<div class="empty-note">Email templates are set up for Michael only for now.</div>`
+    : `<div style="font-size:11.5px;opacity:0.6;">For ${escapeHtml(currentBDM)}. Placeholders: {FirstName}, {Company}. No signature needed: Outlook adds it.</div>` +
+      EMAIL_TPL_FIELDS.map(([k, label, rows]) =>
+        `<label>${label}${EMAIL_DEFAULTS[currentBDM] ? `<button class="link-btn tpl-reset" onclick="resetEmailTpl('${k}')">Reset to default</button>` : ''}</label>` +
+        (rows === 1 ? `<input type="text" id="tpl_${k}" value="${escapeHtml(t[k] || '')}">` : `<textarea id="tpl_${k}" rows="${rows}">${escapeHtml(t[k] || '')}</textarea>`)
+      ).join('') +
+      `<button class="btn btn-primary sheet-done" onclick="saveEmailTemplates()">Save templates</button>`;
+  openSheet('emailTplSheet');
+}
+function resetEmailTpl(k) {
+  const d = EMAIL_DEFAULTS[currentBDM];
+  const el = document.getElementById('tpl_' + k);
+  if (d && el) el.value = d[k] || '';
+}
+async function saveEmailTemplates() {
+  const vals = {};
+  EMAIL_TPL_FIELDS.forEach(([k]) => { vals[k] = document.getElementById('tpl_' + k).value; });
+  const prev = trackerSettings.email ? JSON.parse(JSON.stringify(trackerSettings.email)) : undefined;
+  trackerSettings.email = Object.assign({}, trackerSettings.email || {}, { [currentBDM]: vals });
+  try {
+    await saveSettings();
+  } catch (e) {
+    if (prev === undefined) delete trackerSettings.email; else trackerSettings.email = prev;
+    alert('Could not save the templates — ' + e.message);
+    return;
+  }
+  // Drafts not edited by hand pick up the new wording.
+  Object.keys(emailDrafts).forEach(id => { if (!emailDrafts[id].edited && !emailDrafts[id].pending) delete emailDrafts[id]; });
+  closeSheet('emailTplSheet');
+  showToast('✅ Templates saved');
 }
 
 function escapeHtml(s) {
@@ -4031,7 +4477,7 @@ function render() {
   const html = nearHtml !== null ? nearHtml : viewMode === 'today'
     ? (todayList.length ? routeCardHtml(todayList) : '') + section(`Today's plan \u2014 ${escapeHtml(currentBDM)}`, 'today', todayList)
     : viewMode === 'cold'
-    ? section(`Cold \u2014 not yet contacted, ${COLD_SORT_LABELS[coldSort]}`,'cold',cold)
+    ? (cold.length ? `<div class="sel-row"><button class="link-btn" onclick="toggleColdSelect()">${coldSelect ? 'Cancel select' : 'Select several \u2192 Pipeline'}</button></div>` : '') + section(`Cold \u2014 not yet contacted, ${COLD_SORT_LABELS[coldSort]}`,'cold',cold)
     : section('Overdue','overdue',overdue) + section('Due today','today',today) +
       section('Upcoming','upcoming',upcoming) + section('No follow-up set','nodate',nodate);
   const filterActive = stateFilter.size > 0 || bdmFilter !== 'ALL' || stageFilter !== 'ALL' || !!searchFilter || typeFilter.size > 0;
@@ -4041,7 +4487,7 @@ function render() {
         ? "Nothing planned for today \u2014 swipe a card right, or open it and tap Add to today's plan."
         : viewMode === 'cold'
         ? 'No cold leads \u2014 tap + to add one, or Research an area.'
-        : 'Nothing in the pipeline yet \u2014 log a call, email or visit on a Cold lead to move it here.');
+        : 'Nothing in the pipeline yet \u2014 log a call, email or visit on a Cold lead, or tap Add to Pipeline, to move it here.');
   const cardsShown = cardBudget === Infinity ? cardsTotal : pageLimit - Math.max(0, cardBudget);
   const moreHtml = cardsShown < cardsTotal
     ? `<button class="btn btn-ghost" style="width:100%;margin:6px 0 12px;" onclick="showMoreCards()">Show more \u2014 ${cardsShown} of ${cardsTotal} shown</button>`
@@ -4056,6 +4502,7 @@ function render() {
     : lost.length
     ? lost.map(cardHtml).join('')
     : '<div class="empty-note">Nothing marked lost yet</div>';
+  updateBatchBars();
 }
 function showMoreCards() { pageLimit += PAGE_SIZE; render(); }
 
