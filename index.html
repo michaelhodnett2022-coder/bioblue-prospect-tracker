@@ -323,6 +323,7 @@ body { background:#071a33 linear-gradient(170deg,#04142a 0%,#0a2a52 55%,#0d3a6e 
 .a-chip { flex:none;display:inline-flex;align-items:center;gap:5px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;padding:7px 10px;
   border-radius:20px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.08);color:white;cursor:pointer;white-space:nowrap; }
 .a-chip .x { opacity:0.55;font-size:11px; }
+.a-chip.clear-all { color:#f87171;border-color:rgba(248,113,113,0.5); }
 .state-chips { display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px; }
 .state-chips::-webkit-scrollbar { display:none; }
 .st-chip { flex:none;display:inline-flex;align-items:center;gap:5px;font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:7px 11px;border-radius:20px;
@@ -539,7 +540,7 @@ body.sheet-open { overflow:hidden; }
 <div class="sheet-overlay" id="filterSheet" onclick="if(event.target===this)closeSheet('filterSheet')">
   <div class="sheet">
     <div class="sheet-grip"></div>
-    <div class="sheet-head"><h3>Filters</h3><button class="link-btn" onclick="clearAllFilters()">Reset</button></div>
+    <div class="sheet-head"><h3>Filters</h3><button class="link-btn" onclick="clearAllFilters()">Clear all</button></div>
     <div class="sheet-label">BDM</div>
     <div class="sheet-row">
       <select id="bdmFilterSelect" onchange="setBdmFilter(this.value)"><option value="ALL">All BDMs</option></select>
@@ -560,7 +561,10 @@ body.sheet-open { overflow:hidden; }
         <option value="type">Business type</option>
       </select>
     </div>
-    <button class="btn btn-primary sheet-done" onclick="closeSheet('filterSheet')">Show <span id="filterResultCount">0</span> leads</button>
+    <div class="sheet-row" style="margin-top:20px;">
+      <button class="btn btn-ghost sheet-done" style="margin-top:0;" onclick="clearAllFilters()">Clear all filters</button>
+      <button class="btn btn-primary sheet-done" style="margin-top:0;" onclick="closeSheet('filterSheet')">Show <span id="filterResultCount">0</span> leads</button>
+    </div>
   </div>
 </div>
 
@@ -820,7 +824,7 @@ let pageLimit = PAGE_SIZE, _pageSig = '';
 let stateFilter = new Set((() => { try { return JSON.parse(localStorage.getItem('bb_tracker_states') || '[]'); } catch (e) { return []; } })().filter(st => STATES.includes(st)));
 function stateOk(p) { return !stateFilter.size || stateFilter.has(p.state); }
 let bdmFilter = 'ALL';
-let stageFilter = 'ALL';
+const stageFilter = new Set();   // v1.8: several stages at once; empty = all
 // Pipeline = leads in motion (Contacted onward). Cold = New Leads never contacted yet.
 let viewMode = 'pipeline';
 let searchFilter = '';
@@ -1904,7 +1908,7 @@ async function importPastedResearch() {
 // Cold <-> Pipeline. Switching resets the stage filter (stages only apply to Pipeline).
 function setViewMode(mode) {
   viewMode = ['cold', 'today'].includes(mode) ? mode : 'pipeline';
-  stageFilter = 'ALL';
+  stageFilter.clear();
   document.getElementById('viewTabPipeline').classList.toggle('active', viewMode === 'pipeline');
   document.getElementById('viewTabCold').classList.toggle('active', viewMode === 'cold');
   document.getElementById('viewTabToday').classList.toggle('active', viewMode === 'today');
@@ -3668,10 +3672,11 @@ function setBdmFilter(name) {
   render();
 }
 
-// Clicking the already-active stage clears the filter, same toggle pattern
-// as the state pills.
+// v1.8: tap stages to add/remove them (several at once); "All" clears them —
+// same pattern as the state tick boxes.
 function setStageFilter(s) {
-  stageFilter = (stageFilter === s) ? 'ALL' : s;
+  if (s === 'ALL') stageFilter.clear();
+  else stageFilter.has(s) ? stageFilter.delete(s) : stageFilter.add(s);
   render();
 }
 
@@ -3682,8 +3687,8 @@ function renderStageStrip(counts) {
   if (block) block.style.display = viewMode === 'pipeline' ? '' : 'none';
   if (viewMode !== 'pipeline') { strip.innerHTML = ''; return; }
   const stages = PIPELINE_STATUSES;
-  strip.innerHTML = stages.map(s =>
-    `<button class="filter-pill${stageFilter===s?' active':''}" onclick="setStageFilter('${s}')">${s} (${counts[s]||0})</button>`
+  strip.innerHTML = `<button class="filter-pill${!stageFilter.size ? ' active' : ''}" onclick="setStageFilter('ALL')">All</button>` + stages.map(s =>
+    `<button class="filter-pill${stageFilter.has(s) ? ' active' : ''}" onclick="setStageFilter('${s}')">${s} (${counts[s]||0})</button>`
   ).join('');
 }
 
@@ -3709,17 +3714,17 @@ function updateBdmInitials() {
 // all states, your own leads, every type, every stage.
 function renderActiveFilters(resultCount) {
   const chips = [];
-  if (stageFilter !== 'ALL') chips.push({ k: 'stage', label: stageFilter });
+  stageFilter.forEach(st => chips.push({ k: 'stage:' + st, label: st }));
   typeFilter.forEach(t => { const ti = typeInfo(t); chips.push({ k: 'type:' + t, label: t === '__none' ? 'No type yet' : t, color: ti ? ti.color : null }); });
   // Mine / Team toggle. A single other BDM (picked in Filters) shows as their name with a ✕ back to Mine.
   const seg = document.getElementById('bdmSeg');
   if (seg) seg.innerHTML = (bdmFilter === currentBDM || bdmFilter === 'ALL')
-    ? `<button class="${bdmFilter === currentBDM ? 'on' : ''}" onclick="setBdmView('mine')">Mine</button><button class="${bdmFilter === 'ALL' ? 'on' : ''}" onclick="setBdmView('team')">Team</button>`
+    ? `<button class="${bdmFilter === currentBDM ? 'on' : ''}" onclick="setBdmView('mine')">Just Me</button><button class="${bdmFilter === 'ALL' ? 'on' : ''}" onclick="setBdmView('team')">Team</button>`
     : `<button class="on" onclick="setBdmView('mine')">${escapeHtml(bdmFilter.split(' ')[0])}<span class="x">&#10005;</span></button>`;
   const wrap = document.getElementById('activeChips');
   if (wrap) wrap.innerHTML = chips.map(c =>
     `<button class="a-chip" data-k="${escapeHtml(c.k)}" onclick="clearFilter(this.dataset.k)">${c.color ? `<span class="type-dot" style="background:${c.color};"></span>` : ''}${escapeHtml(c.label)}<span class="x">&#10005;</span></button>`
-  ).join('');
+  ).join('') + (anyFilterOn() ? `<button class="a-chip clear-all" onclick="clearAllFilters()">Clear all filters<span class="x">&#10005;</span></button>` : '');
   const btn = document.getElementById('filterBtn');
   if (btn) { btn.classList.toggle('has-active', chips.length > 0); btn.innerHTML = '&#9881; Filters' + (chips.length ? ' &middot; ' + chips.length : ''); }
   const rc = document.getElementById('filterResultCount');
@@ -3732,13 +3737,23 @@ function setBdmView(v) {
   render();
 }
 function clearFilter(k) {
-  if (k === 'stage') stageFilter = 'ALL';
+  if (k && k.startsWith('stage:')) stageFilter.delete(k.slice(6));
   else if (k && k.startsWith('type:')) typeFilter.delete(k.slice(5));
   render();
 }
+// v1.8: anything narrowing the list away from the default (Just Me, every
+// state, stage and type, no search).
+function anyFilterOn() {
+  return stageFilter.size > 0 || typeFilter.size > 0 || stateFilter.size > 0 || !!searchFilter || bdmFilter !== currentBDM;
+}
 function clearAllFilters() {
-  bdmFilter = currentBDM; stageFilter = 'ALL'; typeFilter.clear();
+  bdmFilter = currentBDM; stageFilter.clear(); typeFilter.clear();
   document.getElementById('bdmFilterSelect').value = currentBDM;
+  stateFilter.clear();
+  try { localStorage.setItem('bb_tracker_states', '[]'); } catch (e) {}
+  searchFilter = '';
+  const sb = document.getElementById('searchBox');
+  if (sb) sb.value = '';
   render();
 }
 
@@ -4463,7 +4478,7 @@ function render() {
   const passes = p => {
     if (!stateOk(p)) return false;
     if (bdmFilter !== 'ALL' && p.bdm !== bdmFilter) return false;
-    if (stageFilter !== 'ALL' && p.status !== stageFilter) return false;
+    if (stageFilter.size && !stageFilter.has(p.status)) return false;
     if (typeFilter.size && !typeFilter.has(p.businessType || '__none')) return false;
     if (searchFilter) {
       const haystack = (p.company + ' ' + (p.contactName || '') + ' ' + (p.suburb || '')).toLowerCase();
@@ -4521,7 +4536,7 @@ function render() {
   const byFollowUpAsc = (a,b) => a.nextFollowUp.localeCompare(b.nextFollowUp);
   const byCreatedOldest = (a,b) => (a.createdDate||'').localeCompare(b.createdDate||'');
   const byCreatedNewest = (a,b) => (b.createdDate||'').localeCompare(a.createdDate||'');
-  const stageActive = stageFilter !== 'ALL';
+  const stageActive = stageFilter.size > 0;
 
   const overdue  = active.filter(p => bucketFor(p) === 'overdue').sort(stageActive ? byCreatedNewest : byFollowUpAsc);
   const today    = active.filter(p => bucketFor(p) === 'today').sort(stageActive ? byCreatedNewest : (() => 0));
@@ -4530,7 +4545,7 @@ function render() {
 
   // Paged lists: filters above always run over every lead; only drawing is
   // capped. The cap resets when the view, a filter, search or Near me changes.
-  const pageSig = [viewMode, searchFilter, [...stateFilter].sort().join(','), bdmFilter, stageFilter, [...typeFilter].sort().join(','), coldSort,
+  const pageSig = [viewMode, searchFilter, [...stateFilter].sort().join(','), bdmFilter, [...stageFilter].sort().join(','), [...typeFilter].sort().join(','), coldSort,
     nearMode && myPos ? `${myPos.lat},${myPos.lng},${nearRadiusKm}` : ''].join('|');
   if (pageSig !== _pageSig) { _pageSig = pageSig; pageLimit = PAGE_SIZE; }
   let cardBudget = viewMode === 'today' && !(nearMode && myPos) ? Infinity : pageLimit, cardsTotal = 0;
@@ -4572,7 +4587,7 @@ function render() {
     ? (cold.length ? `<div class="sel-row"><button class="link-btn" onclick="toggleColdSelect()">${coldSelect ? 'Cancel select' : 'Select several \u2192 Pipeline'}</button></div>` : '') + section(`Cold \u2014 not yet contacted, ${COLD_SORT_LABELS[coldSort]}`,'cold',cold)
     : section('Overdue','overdue',overdue) + section('Due today','today',today) +
       section('Upcoming','upcoming',upcoming) + section('No follow-up set','nodate',nodate);
-  const filterActive = stateFilter.size > 0 || bdmFilter !== 'ALL' || stageFilter !== 'ALL' || !!searchFilter || typeFilter.size > 0;
+  const filterActive = stateFilter.size > 0 || bdmFilter !== 'ALL' || stageFilter.size > 0 || !!searchFilter || typeFilter.size > 0;
   const emptyMsg = filterActive
     ? `No prospects match ${searchFilter ? `"${searchFilter}"` : 'that filter'} — try clearing the search or switching filters.`
     : (viewMode === 'today'
