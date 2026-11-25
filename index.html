@@ -478,7 +478,7 @@ body.sheet-open { overflow:hidden; }
 <div id="dashboard"></div>
 
 <div class="section-label lost" id="lostToggle" onclick="toggleLostSection()">
-  <span id="lostChevron">&#9656;</span> Lost <span class="section-count" id="lostCount">0</span>
+  <span id="lostChevron">&#9656;</span> Archived (Lost) <span class="section-count" id="lostCount">0</span>
 </div>
 <div class="lost-wrap" id="lostWrap"></div>
 
@@ -570,6 +570,7 @@ body.sheet-open { overflow:hidden; }
     <button class="menu-item" onclick="toolAction(importFromDrive)"><span class="mi-ico">&#9729;&#65039;</span><span>Import from Drive<small>Bring in a Research Inbox sheet</small></span></button>
     <button class="menu-item" onclick="toolAction(openAddressModal)"><span class="mi-ico">&#129513;</span><span id="toolsMissing">Fill missing details<small>Addresses and business types</small></span></button>
     <button class="menu-item" onclick="toolAction(openDuplicates)"><span class="mi-ico">&#128257;</span><span>Find duplicates<small>Merge double-ups, and spot leads that are already BioBlue clients</small></span></button>
+    <button class="menu-item" onclick="toolAction(backfillCoords)"><span class="mi-ico">&#128205;</span><span>Place leads on the map<small>One-off: store map positions for leads that don't have one yet</small></span></button>
     <button class="menu-item" onclick="toolAction(clearColdList)"><span class="mi-ico">&#129529;</span><span>Clear my Cold list<small>Start fresh: deletes untouched Cold leads so research can find them again</small></span></button>
     <div class="menu-group">Backup import</div>
     <button class="menu-item" onclick="toolAction(openPasteResearch)"><span class="mi-ico">&#128203;</span><span>Paste research<small>If Import from Drive won't open</small></span></button>
@@ -669,6 +670,7 @@ const GDRIVE_CLIENT_ID   = '49055725643-mlnqu8l92vmau83rnrk8imupiqvs03t1.apps.go
 const GDRIVE_FOLDER_NAME = 'BioBlue Audits';
 const TRACKER_SUBFOLDER  = 'Prospect Tracker Data';
 const TRACKER_FILE_NAME  = 'BB_Prospect_Tracker.json';
+const ARCHIVE_FILE_NAME  = 'BB_Prospect_Tracker_Archive.json';
 const PROSPECT_FORM_URL  = 'https://michaelhodnett2022-coder.github.io/bioblue-prospect';
 const QUOTE_BUILDER_URL  = 'https://michaelhodnett2022-coder.github.io/bioblue-quote';
 const PROSPECTS_FOLDER   = 'Prospects';
@@ -700,6 +702,15 @@ const STATES = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA'];
 let gdriveToken = null;
 let trackerFileId = null;
 let prospects = [];
+// Lost and Thrown back leads live in a separate archive file, loaded only
+// when needed (Archived view, imports, Research). saveTracker() moves leads
+// between the two files as their status changes.
+let archive = [];
+let archiveFileId = null, archiveLoaded = false, _archivePromise = null, lastArchiveJson = '[]';
+let trackerFolderId = null;
+// Paged lists: cards drawn per view, reset to PAGE_SIZE when the view or a filter changes.
+const PAGE_SIZE = 50;
+let pageLimit = PAGE_SIZE, _pageSig = '';
 // States ticked on the main screen (empty = all states). Remembered on this device.
 let stateFilter = new Set((() => { try { return JSON.parse(localStorage.getItem('bb_tracker_states') || '[]'); } catch (e) { return []; } })().filter(st => STATES.includes(st)));
 function stateOk(p) { return !stateFilter.size || stateFilter.has(p.state); }
@@ -1211,6 +1222,7 @@ async function getTrackerFileId() {
 
   const adminId   = await getOrCreateFolder(rootId, 'ADMIN DATA - DO NOT REMOVE');
   const trackerId = await getOrCreateFolder(adminId, TRACKER_SUBFOLDER);
+  trackerFolderId = trackerId;
 
   const fr = await fetch(
     `https://www.googleapis.com/drive/v3/files?q=name='${TRACKER_FILE_NAME}' and '${trackerId}' in parents and trashed=false&fields=files(id)`,
@@ -1231,6 +1243,83 @@ async function getTrackerFileId() {
   const cd = await cr.json();
   trackerFileId = cd.id;
   return trackerFileId;
+}
+
+// =====================================================================
+// ARCHIVE FILE — Lost and Thrown back (IMPORT=N) leads, kept out of the
+// main file so it only carries live leads. Same folder as the main file.
+// The first time the archive is created, a backup copy of the main file
+// is saved alongside it before anything moves.
+// =====================================================================
+function isArchivable(p) { return p.status === 'Lost' || p.status === THROWN_BACK; }
+function allLeads() { return archiveLoaded ? prospects.concat(archive) : prospects; }
+
+async function findTrackerFolderFile(name) {
+  const fr = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=name='${name}' and '${trackerFolderId}' in parents and trashed=false&fields=files(id)`,
+    { headers: { Authorization: `Bearer ${gdriveToken}` } }
+  );
+  if (!fr.ok) throw new Error('Drive search failed (' + fr.status + ')');
+  const fd = await fr.json();
+  return fd.files && fd.files.length ? fd.files[0].id : null;
+}
+async function writeJsonFile(fileId, data) {
+  const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/json' },
+    body: typeof data === 'string' ? data : JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('Save failed (' + res.status + ')');
+}
+function perthStamp() {
+  const parts = {};
+  new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Perth', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+    .formatToParts(new Date()).forEach(x => { parts[x.type] = x.value; });
+  return `${parts.day}${parts.month}${parts.year}_${parts.hour === '24' ? '00' : parts.hour}${parts.minute}`;
+}
+async function loadArchive() {
+  if (!trackerFolderId || !trackerFileId) { trackerFileId = null; await getTrackerFileId(); }
+  let id = await findTrackerFolderFile(ARCHIVE_FILE_NAME);
+  if (!id) {
+    // One-time migration: back up the main file first. If the backup fails, nothing moves.
+    const bk = await fetch(`https://www.googleapis.com/drive/v3/files/${trackerFileId}/copy?fields=id`, {
+      method: 'POST', headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: `BB_Prospect_Tracker_backup_${perthStamp()}.json`, parents: [trackerFolderId] })
+    });
+    if (!bk.ok) throw new Error('Could not back up the tracker before archiving (' + bk.status + ')');
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify({ name: ARCHIVE_FILE_NAME, parents: [trackerFolderId] })], { type: 'application/json' }));
+    form.append('file', new Blob(['[]'], { type: 'application/json' }));
+    const cr = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+      method: 'POST', headers: { Authorization: `Bearer ${gdriveToken}` }, body: form
+    });
+    if (!cr.ok) throw new Error('Could not create the archive file (' + cr.status + ')');
+    id = (await cr.json()).id;
+  }
+  const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
+  if (!dl.ok) throw new Error('Archive fetch failed (' + dl.status + ')');
+  const text = await dl.text();
+  const driveArchive = text.trim() ? JSON.parse(text) : [];
+  // Keep in-memory archive records only if they hold unsaved changes.
+  const unsaved = JSON.stringify(archive) !== lastArchiveJson;
+  const driveIds = new Set(driveArchive.map(p => p.id));
+  archive = unsaved ? [...archive.filter(p => !driveIds.has(p.id)), ...driveArchive] : driveArchive;
+  lastArchiveJson = JSON.stringify(driveArchive);
+  archiveFileId = id;
+  archiveLoaded = true;
+  dedupeAcrossFiles();
+}
+function ensureArchiveLoaded() {
+  if (archiveLoaded) return Promise.resolve();
+  if (!_archivePromise) _archivePromise = loadArchive().finally(() => { _archivePromise = null; });
+  return _archivePromise;
+}
+// A lead id in both files (an interrupted move, or an older app version
+// writing an archived lead back): the archive copy wins.
+function dedupeAcrossFiles() {
+  if (!archiveLoaded) return;
+  const aIds = new Set(archive.map(p => p.id));
+  if (prospects.some(p => aIds.has(p.id))) prospects = prospects.filter(p => !aIds.has(p.id));
 }
 
 // Resolves gdriveToken + trackerFileId. Idempotent — if already connected
@@ -1269,6 +1358,11 @@ async function fetchAndMergeProspects() {
   const leadCount = prospects.filter(p => p.status !== TENDER).length;
   setAuthStatus(`${leadCount} prospect${leadCount!==1?'s':''}`);
   render();
+  // Refresh the archive too if it's already in use this session.
+  if (archiveLoaded) { archiveLoaded = false; ensureArchiveLoaded().then(render).catch(() => {}); }
+  // Lost / Thrown back leads still in the main file (first run, or saved by an
+  // older app version): move them to the archive.
+  if (prospects.some(isArchivable)) setTimeout(() => saveTracker(), 0);
 }
 
 // Explicit Load button — connect if needed, then always refresh, so it
@@ -1318,14 +1412,31 @@ async function saveTracker() {
   if (saveInFlight) { saveQueued = true; return true; }
   saveInFlight = true;
   setSaveStatus('saving', 'Saving...');
-  let ok = false;
+  let ok = false, moved = false;
   try {
-    const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${trackerFileId}?uploadType=media`, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${gdriveToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(prospects)
-    });
-    if (!res.ok) throw new Error('Save failed (' + res.status + ')');
+    // Archive moves first. Any failure here leaves leads where they are and the
+    // main save still goes ahead.
+    try {
+      if (prospects.some(isArchivable) || (archiveLoaded && archive.some(p => !isArchivable(p)))) await ensureArchiveLoaded();
+      if (archiveLoaded) {
+        dedupeAcrossFiles();
+        const toArchive = prospects.filter(isArchivable), toMain = archive.filter(p => !isArchivable(p));
+        if (toArchive.length || toMain.length) {
+          // Write order keeps every lead in at least one file at all times.
+          if (toMain.length) await writeJsonFile(trackerFileId, prospects.concat(toMain));
+          const newArchive = archive.filter(isArchivable).concat(toArchive);
+          const snap = JSON.stringify(newArchive);
+          await writeJsonFile(archiveFileId, snap);
+          archive = newArchive; lastArchiveJson = snap;
+          prospects = prospects.filter(p => !toArchive.includes(p)).concat(toMain.filter(p => !prospects.includes(p)));
+          moved = true;
+        } else {
+          const snap = JSON.stringify(archive);
+          if (snap !== lastArchiveJson) { await writeJsonFile(archiveFileId, snap); lastArchiveJson = snap; }
+        }
+      }
+    } catch (e) { /* archive unreachable: retried on the next save */ }
+    await writeJsonFile(trackerFileId, prospects);
     setSaveStatus('saved', 'Saved \u2014 ' + new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }));
     ok = true;
   } catch (e) {
@@ -1333,6 +1444,7 @@ async function saveTracker() {
     showToast('\u26A0\uFE0F Save failed — ' + e.message);
   } finally {
     saveInFlight = false;
+    if (moved) render();
     if (saveQueued) { saveQueued = false; saveTracker(); }
   }
   return ok;
@@ -1445,8 +1557,9 @@ async function importResearchRows(rows, sourceLabel) {
     if (!rows.length) { alert(`No rows found in ${sourceLabel}. Nothing was imported.`); return false; }
     const hasImportCol = Object.keys(rows[0]).some(h => normKey(h) === 'import');
 
+    try { await ensureArchiveLoaded(); } catch (e) { throw new Error('Could not load the archive of Lost / thrown-back companies (' + e.message + ')'); }
     if (clientNamesCache.date !== todayStr()) { try { await loadClientNames(); } catch (e) {} }
-    const pool = prospects.filter(p => p.company && p.status !== TENDER).map(p => ({ p, sig: leadSig(p) }));
+    const pool = allLeads().filter(p => p.company && p.status !== TENDER).map(p => ({ p, sig: leadSig(p) }));
     const csigs = clientSigs();
     const kept = [], thrown = [], skipped = [], merges = [], clientSkips = [], similar = [];
     let noName = 0;
@@ -1506,6 +1619,7 @@ async function importResearchRows(rows, sourceLabel) {
     const saved = await saveTracker();
     if (!saved) {
       prospects = prospects.filter(p => !added.includes(p));
+      archive = archive.filter(p => !added.includes(p));
       mergeBackup.forEach(([k, json]) => { Object.keys(k).forEach(f => delete k[f]); Object.assign(k, JSON.parse(json)); });
       render(); alert('Import could not be saved to Drive, so nothing was changed. Tap Load and try again.'); return false;
     }
@@ -1728,7 +1842,7 @@ function geocodeOne(geocoder, address) {
 
 // Places every lead in `list` that has an address but no current
 // coordinates. One at a time, gently paced. Returns how many changed.
-async function geocodeMissing(list, onProgress) {
+async function geocodeMissing(list, onProgress, gapMs = 120) {
   const todo = list.filter(p => geoAddress(p) && !hasCoords(p) && p.geoFailed !== geoAddress(p));
   if (!todo.length) return 0;
   await loadMaps();
@@ -1751,9 +1865,42 @@ async function geocodeMissing(list, onProgress) {
     } else if (r.status === 'REQUEST_DENIED') {
       throw new Error('Google refused the address lookup (Maps key settings)');
     }
-    await new Promise(res => setTimeout(res, 120));
+    await new Promise(res => setTimeout(res, gapMs));
   }
   return changed;
+}
+
+// Address saved on a card: place the lead on the map a moment later (once
+// typing in the other address fields has settled), so Near me never waits.
+const _geoTimers = new Map();
+function scheduleGeocode(p) {
+  clearTimeout(_geoTimers.get(p.id));
+  _geoTimers.set(p.id, setTimeout(() => {
+    _geoTimers.delete(p.id);
+    geocodeMissing([p]).then(n => { if (n) saveTracker(); }).catch(() => {});
+  }, 2000));
+}
+
+// Tools > Place leads on the map: one-off backfill for live leads with an
+// address but no stored coordinates. Paced, and saved every 25 leads.
+async function backfillCoords() {
+  if (!(await ensureConnected())) { showToast('\u26A0\uFE0F Could not connect to Drive \u2014 tap Load and try again'); return; }
+  const todo = prospects.filter(p => (p.status === 'New Lead' || PIPELINE_STATUSES.includes(p.status)) && geoAddress(p) && !hasCoords(p) && p.geoFailed !== geoAddress(p));
+  if (!todo.length) { showToast('\u2705 Every lead with an address is already on the map'); return; }
+  if (!confirm(`Place ${todo.length} lead${todo.length !== 1 ? 's' : ''} on the map now?\n\nTakes about ${Math.max(1, Math.ceil(todo.length * 0.5 / 60))} min. Keep this screen open.`)) return;
+  let placed = 0;
+  try {
+    for (let i = 0; i < todo.length; i += 25) {
+      const n = await geocodeMissing(todo.slice(i, i + 25), k => setAuthStatus(`Placing leads on the map... ${i + k} of ${todo.length}`), 400);
+      if (n) { placed += n; await saveTracker(); }
+    }
+    showToast(`\u2705 Done \u2014 ${placed} lead${placed !== 1 ? 's' : ''} updated`);
+  } catch (e) {
+    showToast('\u26A0\uFE0F ' + e.message + (placed ? ` (${placed} placed before it stopped)` : ''));
+  }
+  const leadCount = prospects.filter(p => p.status !== TENDER).length;
+  setAuthStatus(`${leadCount} prospect${leadCount !== 1 ? 's' : ''}`);
+  render();
 }
 
 function distanceKm(aLat, aLng, bLat, bLng) {
@@ -1823,11 +1970,7 @@ async function setNearOrigin(lat, lng, label) {
   const info = document.getElementById('nearInfo');
   myPos = { lat, lng, at: new Date(), label };
   nearMode = true;
-  try {
-    const pool = prospects.filter(p => p.status === 'New Lead' || PIPELINE_STATUSES.includes(p.status));
-    const changed = await geocodeMissing(pool, (i, n) => { info.textContent = `Placing addresses on the map... ${i} of ${n}`; });
-    if (changed) saveTracker();
-  } catch (e) { /* leads already placed still show */ }
+  // Near me uses stored coordinates only (placed at import / address save / Tools backfill).
   updateNearBar();
   render();
 }
@@ -1839,9 +1982,6 @@ async function refreshNearMe() {
     myPos = await getMyPosition();
     document.getElementById('placeSearch').value = '';
     nearMode = true;
-    const pool = prospects.filter(p => p.status === 'New Lead' || PIPELINE_STATUSES.includes(p.status));
-    const changed = await geocodeMissing(pool, (i, n) => { info.textContent = `Placing addresses on the map... ${i} of ${n}`; });
-    if (changed) saveTracker();
     updateNearBar();
     render();
   } catch (e) {
@@ -2147,8 +2287,23 @@ async function loadClientNames() {
   }
 }
 
+// Item 4: the exclusion list only covers the state(s) being researched.
+// State codes (upper case) or full state names in the area text; failing
+// that, the single ticked state; failing that, national as before.
+const RESEARCH_STATE_NAMES = { 'WESTERN AUSTRALIA': 'WA', 'NORTHERN TERRITORY': 'NT', 'SOUTH AUSTRALIA': 'SA', 'NEW SOUTH WALES': 'NSW', 'QUEENSLAND': 'QLD', 'TASMANIA': 'TAS', 'AUSTRALIAN CAPITAL TERRITORY': 'ACT' };
+function researchStates(area) {
+  const found = new Set(area.match(/\b(ACT|NSW|NT|QLD|SA|TAS|VIC|WA)\b/g) || []);
+  const up = area.toUpperCase();
+  Object.entries(RESEARCH_STATE_NAMES).forEach(([n, c]) => { if (up.includes(n)) found.add(c); });
+  if (!found.size && stateFilter.size === 1) found.add([...stateFilter][0]);
+  return found.size ? found : null;
+}
+
 function buildResearchRequest(area, focus) {
   const date = todayStr();
+  const states = researchStates(area);
+  const stateLabel = states ? ` in ${[...states].sort().join('/')}` : '';
+  const inScope = st => !states || !String(st || '').trim() || states.has(String(st).trim().toUpperCase());
   const title = `${RESEARCH_PREFIX} - ${area} - ${date}`;
   const head =
 `You are the BioBlue Researcher. BioBlue Australia is an Australian-owned AdBlue® (AUS32) manufacturer and distributor. Request from ${currentBDM}, ${date}, sent from the BioBlue Prospect Tracker.
@@ -2187,15 +2342,22 @@ OUTPUT
 
 RULES: Australian English. Always AdBlue® with the ®. Don't present ISO/VDA certification or local WA manufacture as differentiators. Never quote prices.
 
-EXCLUDE these companies (already in the BioBlue Prospect Tracker or previously rejected):
+EXCLUDE these companies${stateLabel} (already in the BioBlue Prospect Tracker or previously rejected):
 `;
-  const names = [...new Set(prospects.filter(p => p.company && p.status !== TENDER)
+  const names = [...new Set(allLeads().filter(p => p.company && p.status !== TENDER && inScope(p.state))
     .map(p => `${p.company}${p.suburb ? ', ' + p.suburb : ''}${p.state ? ' ' + p.state : ''}`))]
     .sort((a, b) => a.localeCompare(b));
   // Existing BioBlue clients (Client Records), compact, after the Tracker list.
-  const trackerKeys = new Set(prospects.map(p => normKey(p.company)));
-  const clients = (clientNamesCache.names || []).filter(n => !trackerKeys.has(normKey(n)));
-  const clientHead = '\nALSO EXCLUDE these existing BioBlue clients (from Client Records):\n';
+  const trackerKeys = new Set(allLeads().map(p => normKey(p.company)));
+  const recs = clientNamesCache.recs || [];
+  let clientPool = clientNamesCache.names || [];
+  if (states && recs.length) {
+    const seenC = new Map();
+    recs.forEach(r => { if (r.n && inScope(r.st) && !seenC.has(normKey(r.n))) seenC.set(normKey(r.n), r.n); });
+    clientPool = [...seenC.values()].sort((a, b) => a.localeCompare(b));
+  }
+  const clients = clientPool.filter(n => !trackerKeys.has(normKey(n)));
+  const clientHead = `\nALSO EXCLUDE these existing BioBlue clients${stateLabel} (from Client Records):\n`;
   let list = '', included = 0, budget = RESEARCH_MAX_CHARS - head.length - 220;
   const clientText = clients.length ? clientHead + clients.join('; ') + '\n' : '';
   // Clients get up to a third of the room; the Tracker list gets the rest.
@@ -2222,16 +2384,19 @@ EXCLUDE these companies (already in the BioBlue Prospect Tracker or previously r
 function openResearchModal() {
   document.getElementById('researchArea').value = '';
   document.getElementById('researchFocus').value = '';
-  const n = new Set(prospects.filter(p => p.company).map(p => normKey(p.company))).size;
   const info = document.getElementById('researchInfo');
   const showInfo = () => {
+    const n = new Set(allLeads().filter(p => p.company).map(p => normKey(p.company))).size;
     const c = (clientNamesCache.names || []).length;
     info.textContent = !trackerFileId
       ? 'Tap Load first, so Tracker leads and existing clients can be excluded.'
-      : `Excluded: ${n} compan${n !== 1 ? 'ies' : 'y'} in the Tracker` + (c ? ` and ${c} existing clients.` : clientNamesCache.loading ? ', loading existing clients...' : ' (existing clients could not be loaded).') +
+      : !archiveLoaded
+      ? 'Loading archived (Lost / thrown-back) companies...'
+      : `Excluded: ${n} compan${n !== 1 ? 'ies' : 'y'} in the Tracker and archive` + (c ? ` and ${c} existing clients.` : clientNamesCache.loading ? ', loading existing clients...' : ' (existing clients could not be loaded).') +
         ` Leads you import are assigned to ${currentBDM}.`;
   };
   showInfo();
+  if (trackerFileId && !archiveLoaded) ensureArchiveLoaded().then(showInfo).catch(e => { info.textContent = '\u26A0\uFE0F Archived companies could not be loaded (' + e.message + ') \u2014 close and reopen to retry.'; });
   if (trackerFileId && clientNamesCache.date !== todayStr()) loadClientNames().then(showInfo).catch(showInfo);
   document.getElementById('researchModal').classList.add('open');
 }
@@ -2240,6 +2405,8 @@ function closeResearchModal() { document.getElementById('researchModal').classLi
 function researchRequestOrWarn() {
   const area = document.getElementById('researchArea').value.trim();
   if (!area) { showToast('Type an area first'); return null; }
+  // Archived companies must stay excluded: wait for the archive if it's still loading.
+  if (trackerFileId && !archiveLoaded) { ensureArchiveLoaded().catch(() => {}); showToast('Still loading archived companies \u2014 try again in a moment'); return null; }
   return buildResearchRequest(area, document.getElementById('researchFocus').value.trim());
 }
 
@@ -2957,7 +3124,7 @@ async function doSyncActivityToNotesLog(p, activityText) {
 // =====================================================================
 // ACTIVITY / STATUS / FOLLOW-UP
 // =====================================================================
-function findProspect(id) { return prospects.find(p => p.id === id); }
+function findProspect(id) { return prospects.find(p => p.id === id) || archive.find(p => p.id === id); }
 
 function logActivity(id, type, text) {
   const p = findProspect(id);
@@ -3118,7 +3285,7 @@ function updateField(id, field, value) {
   const p = findProspect(id);
   if (!p) return;
   p[field] = (value || '').trim();
-  if (ADDRESS_FIELDS.includes(field)) { delete p.lat; delete p.lng; delete p.geoAddr; delete p.geoFailed; delete p.geoApprox; }
+  if (ADDRESS_FIELDS.includes(field)) { delete p.lat; delete p.lng; delete p.geoAddr; delete p.geoFailed; delete p.geoApprox; scheduleGeocode(p); }
   saveTracker();
   if (p.clientId && p.status !== 'Won' && CLIENT_RECORD_SYNCED_FIELDS.has(field)) queueClientRecordSync(p);
   const detail = document.getElementById('detail-' + id);
@@ -3461,6 +3628,12 @@ function toggleLostSection() {
   document.getElementById('lostWrap').classList.toggle('open');
   const open = document.getElementById('lostWrap').classList.contains('open');
   document.getElementById('lostChevron').textContent = open ? '\u25BE' : '\u25B8';
+  // Archived leads live in the archive file: load it the first time this opens.
+  if (open && !archiveLoaded && trackerFileId) {
+    ensureArchiveLoaded().then(render).catch(e => {
+      document.getElementById('lostWrap').innerHTML = `<div class="empty-note">\u26A0\uFE0F Could not load archived leads \u2014 ${escapeHtml(e.message)}. Close and reopen to retry.</div>`;
+    });
+  }
 }
 
 function daysBetween(a, b) {
@@ -3716,7 +3889,7 @@ function render() {
   updateTenderBadge();
   const cc = document.getElementById('connectCard');
   if (cc) cc.style.display = trackerFileId ? 'none' : '';
-  const visible = prospects.filter(p => {
+  const passes = p => {
     if (!stateOk(p)) return false;
     if (bdmFilter !== 'ALL' && p.bdm !== bdmFilter) return false;
     if (stageFilter !== 'ALL' && p.status !== stageFilter) return false;
@@ -3726,10 +3899,11 @@ function render() {
       if (!haystack.includes(searchFilter)) return false;
     }
     return true;
-  });
+  };
+  const visible = prospects.filter(passes);
   const active = visible.filter(p => PIPELINE_STATUSES.includes(p.status));
   const todayList = visible.filter(p => isPlannedToday(p)).sort((a, b) => (a.planAt || 0) - (b.planAt || 0));
-  const lost   = visible.filter(p => p.status === 'Lost');
+  const lost   = prospects.concat(archive).filter(p => p.status === 'Lost' && passes(p));
   const cold   = visible.filter(p => p.status === 'New Lead').sort(coldComparator());
 
   // Stage strip counts reflect State/BDM/search but deliberately NOT the
@@ -3783,10 +3957,20 @@ function render() {
   const upcoming = active.filter(p => bucketFor(p) === 'upcoming').sort(stageActive ? byCreatedNewest : byFollowUpAsc);
   const nodate   = active.filter(p => bucketFor(p) === 'nodate').sort(stageActive ? byCreatedNewest : byCreatedOldest);
 
+  // Paged lists: filters above always run over every lead; only drawing is
+  // capped. The cap resets when the view, a filter, search or Near me changes.
+  const pageSig = [viewMode, searchFilter, [...stateFilter].sort().join(','), bdmFilter, stageFilter, [...typeFilter].sort().join(','), coldSort,
+    nearMode && myPos ? `${myPos.lat},${myPos.lng},${nearRadiusKm}` : ''].join('|');
+  if (pageSig !== _pageSig) { _pageSig = pageSig; pageLimit = PAGE_SIZE; }
+  let cardBudget = viewMode === 'today' && !(nearMode && myPos) ? Infinity : pageLimit, cardsTotal = 0;
   const section = (label, cls, list) => {
     if (!list.length) return '';
+    cardsTotal += list.length;
+    const shown = list.slice(0, Math.max(0, cardBudget));
+    cardBudget -= shown.length;
+    if (!shown.length) return '';
     return `<div class="section-label ${cls}">${label} <span class="section-count">${list.length}</span></div>` +
-           list.map(cardHtml).join('');
+           shown.map(cardHtml).join('');
   };
 
   renderActiveFilters(viewMode === 'cold' ? cold.length : viewMode === 'today' ? todayList.length : active.length);
@@ -3825,15 +4009,22 @@ function render() {
         : viewMode === 'cold'
         ? 'No cold leads \u2014 tap + to add one, or Research an area.'
         : 'Nothing in the pipeline yet \u2014 log a call, email or visit on a Cold lead to move it here.');
-  dash.innerHTML = html || `<div class="empty-note">${trackerFileId ? emptyMsg : 'Tap Load to bring in your prospects.'}</div>`;
+  const cardsShown = cardBudget === Infinity ? cardsTotal : pageLimit - Math.max(0, cardBudget);
+  const moreHtml = cardsShown < cardsTotal
+    ? `<button class="btn btn-ghost" style="width:100%;margin:6px 0 12px;" onclick="showMoreCards()">Show more \u2014 ${cardsShown} of ${cardsTotal} shown</button>`
+    : '';
+  dash.innerHTML = html ? html + moreHtml : `<div class="empty-note">${trackerFileId ? emptyMsg : 'Tap Load to bring in your prospects.'}</div>`;
 
   document.getElementById('lostToggle').style.display = viewMode !== 'pipeline' ? 'none' : '';
   if (viewMode !== 'pipeline') document.getElementById('lostWrap').classList.remove('open');
-  document.getElementById('lostCount').textContent = lost.length;
-  document.getElementById('lostWrap').innerHTML = lost.length
+  document.getElementById('lostCount').textContent = archiveLoaded ? lost.length : '\u2026';
+  document.getElementById('lostWrap').innerHTML = !archiveLoaded
+    ? '<div class="empty-note">' + (trackerFileId ? 'Loading archived leads\u2026' : 'Tap Load first.') + '</div>'
+    : lost.length
     ? lost.map(cardHtml).join('')
     : '<div class="empty-note">Nothing marked lost yet</div>';
 }
+function showMoreCards() { pageLimit += PAGE_SIZE; render(); }
 
 populateBdmDropdowns();
 populateStateDropdowns();
