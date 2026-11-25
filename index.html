@@ -770,6 +770,34 @@ const BDM_LIST = Object.keys(BDM_EMAILS);
 const STATES = ['ACT','NSW','NT','QLD','SA','TAS','VIC','WA'];
 
 let gdriveToken = null;
+// v1.6: the Google sign-in is kept on this device with its expiry (Google
+// browser sign-ins last ~1 hour), so a page reload or coming back from another
+// app reconnects without tapping Load. Expired or rejected (401) -> cleared;
+// the next tap asks Google again quietly (prompt: '').
+let gdriveTokenExp = 0;
+const TOKEN_STORE = 'bb_tracker_gtoken';
+function clearToken() {
+  gdriveToken = null; gdriveTokenExp = 0;
+  try { localStorage.removeItem(TOKEN_STORE); } catch (e) {}
+}
+function tokenLive() {
+  if (gdriveToken && Date.now() < gdriveTokenExp) return true;
+  if (gdriveToken && gdriveTokenExp) clearToken();
+  try {
+    const s = JSON.parse(localStorage.getItem(TOKEN_STORE) || 'null');
+    if (s && s.t && Date.now() < s.exp) { gdriveToken = s.t; gdriveTokenExp = s.exp; return true; }
+  } catch (e) {}
+  return false;
+}
+const _rawFetch = window.fetch.bind(window);
+window.fetch = async (url, opts) => {
+  const r = await _rawFetch(url, opts);
+  if (r.status === 401 && String(url).includes('googleapis.com')) {
+    clearToken();
+    setSaveStatus('error', 'Google sign-in expired \u2014 tap Load');
+  }
+  return r;
+};
 let trackerFileId = null;
 let prospects = [];
 // Lost and Thrown back leads live in a separate archive file, loaded only
@@ -848,13 +876,18 @@ function setSaveStatus(state, text) {
 }
 
 async function ensureToken() {
-  if (gdriveToken) return;
+  if (tokenLive()) return;
   await new Promise((resolve, reject) => {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: GDRIVE_CLIENT_ID,
       scope: 'https://www.googleapis.com/auth/drive.file',
       callback: r => {
-        if (r.access_token) { gdriveToken = r.access_token; resolve(); }
+        if (r.access_token) {
+          gdriveToken = r.access_token;
+          gdriveTokenExp = Date.now() + ((Number(r.expires_in) || 3600) - 120) * 1000;
+          try { localStorage.setItem(TOKEN_STORE, JSON.stringify({ t: gdriveToken, exp: gdriveTokenExp })); } catch (e) {}
+          resolve();
+        }
         else reject(new Error(r.error || 'Sign-in failed'));
       },
       error_callback: e => reject(new Error(e.message || 'Sign-in failed'))
@@ -1094,7 +1127,7 @@ function applyProspectToClientRow(p, row, headers) {
 // download/upload round-trip per lead.
 async function pushProspectsToClientRecords(list) {
   if (!list.length) return;
-  if (!gdriveToken) { const ok = await ensureConnected(); if (!ok) throw new Error('Not connected'); }
+  if (!tokenLive()) { const ok = await ensureConnected(); if (!ok) throw new Error('Not connected'); }
   const rootId = await getDriveRootId();
   const sheetId = await getOrCreateAdminSheetId(rootId);
   const dl = await fetch(`https://www.googleapis.com/drive/v3/files/${sheetId}?alt=media`, { headers: { Authorization: `Bearer ${gdriveToken}` } });
@@ -1396,7 +1429,7 @@ function dedupeAcrossFiles() {
 // this session, returns instantly without a network call or a repeat
 // Google sign-in popup.
 async function connectDrive() {
-  if (gdriveToken && trackerFileId) return true;
+  if (tokenLive() && trackerFileId) return true;
   try {
     setAuthStatus('\uD83D\uDD10 Connecting to Google...');
     await ensureToken();
@@ -1448,7 +1481,7 @@ async function loadTracker() {
     if (clientNamesCache.date !== todayStr()) loadClientNames().catch(() => {});
     ensureSettingsLoaded().catch(() => {});
   } catch (e) {
-    setAuthStatus('\u274C ' + e.message);
+    setAuthStatus('\u274C ' + (gdriveToken ? e.message : 'Google sign-in expired \u2014 tap Load'));
     setSaveStatus('error', 'Not connected \u2014 tap Load to retry');
   }
 }
@@ -1459,7 +1492,7 @@ async function loadTracker() {
 // real connect + safe merge-fetch; every save after that in the same
 // session is already connected, so this returns instantly.
 async function ensureConnected() {
-  if (gdriveToken && trackerFileId) return true;
+  if (tokenLive() && trackerFileId) return true;
   const ok = await connectDrive();
   if (!ok) return false;
   try {
@@ -1512,7 +1545,7 @@ async function saveTracker() {
     ok = true;
   } catch (e) {
     setSaveStatus('error', 'Save failed \u2014 will retry on your next edit');
-    showToast('\u26A0\uFE0F Save failed — ' + e.message);
+    showToast(gdriveToken ? '\u26A0\uFE0F Save failed — ' + e.message : '\u26A0\uFE0F Google sign-in expired \u2014 tap Load (or your next change) to reconnect and save');
   } finally {
     saveInFlight = false;
     if (moved) render();
@@ -2319,7 +2352,7 @@ function notClient(i) {
 // Loaded in the background after Load (and when Research opens), cached for the day.
 let clientNamesCache = (() => { try { return JSON.parse(localStorage.getItem('bb_client_names') || '{}'); } catch (e) { return {}; } })();
 async function loadClientNames() {
-  if (!gdriveToken || clientNamesCache.loading) return;
+  if (!tokenLive() || clientNamesCache.loading) return;
   clientNamesCache.loading = true;
   try {
     const rootId = await getDriveRootId();
@@ -4539,6 +4572,8 @@ function pickWho(name) {
 }
 initSwipe();
 render();
+// Still signed in from earlier (within the hour): reconnect and pull the latest without a tap.
+if (tokenLive()) loadTracker();
 </script>
 </body>
 </html>
