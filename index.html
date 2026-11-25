@@ -236,6 +236,13 @@ body {
 .grade-badge { font-size:10px;font-weight:800;padding:1px 6px;border-radius:7px;background:rgba(255,255,255,0.15);margin-left:6px; }
 .plan-flag { font-size:10px;font-weight:800;padding:1px 6px;border-radius:7px;background:#64d2ff;color:#001f3f;margin-left:6px; }
 .plan-row { margin-top:12px; }
+/* v1.7: card sections */
+.card-sec { margin-top:12px;border-top:1px solid rgba(255,255,255,0.1); }
+.sec-head { display:flex;align-items:baseline;gap:8px;width:100%;background:none;border:none;color:white;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:800;
+  letter-spacing:0.6px;text-transform:uppercase;padding:12px 0 6px;cursor:pointer;text-align:left; }
+.sec-head small { font-size:11.5px;font-weight:500;letter-spacing:0;text-transform:none;opacity:0.55;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.sec-arrow { color:#64d2ff;width:12px;flex:none; }
+.card-sec:not(.open) > .sec-body { display:none; }
 .plan-btn { font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;padding:8px 12px;border-radius:8px;border:1.5px solid #64d2ff;background:transparent;color:#64d2ff;cursor:pointer; }
 .plan-btn.on { background:#64d2ff;color:#001f3f; }
 .sort-row { display:flex;justify-content:flex-end;margin:-4px 0 10px; }
@@ -2654,9 +2661,9 @@ function initSwipe() {
     }
     _swipe.dx = dx;
     _swipe.card.style.transition = 'none';
-    _swipe.card.style.transform = `translateX(${Math.max(-140, Math.min(140, dx))}px)`;
+    _swipe.card.style.transform = `translateX(${Math.max(isAdmin() ? -140 : 0, Math.min(140, dx))}px)`;
     const p = findProspect(_swipe.id);
-    if (Math.abs(dx) >= SWIPE_TRIGGER) _swipe.card.dataset.swipe = dx > 0 ? (p && isPlannedToday(p) ? 'unplan' : 'plan') : 'remove';
+    if (dx >= SWIPE_TRIGGER || (dx <= -SWIPE_TRIGGER && isAdmin())) _swipe.card.dataset.swipe = dx > 0 ? (p && isPlannedToday(p) ? 'unplan' : 'plan') : 'remove';
     else delete _swipe.card.dataset.swipe;
   }, { passive: true });
   const end = () => {
@@ -2669,7 +2676,7 @@ function initSwipe() {
     if (!active) return;
     _swipeBlockClickUntil = Date.now() + 400;   // don't let the swipe also open the card
     if (dx >= SWIPE_TRIGGER) togglePlan(id);
-    else if (dx <= -SWIPE_TRIGGER) openRemoveModal(id);
+    else if (dx <= -SWIPE_TRIGGER && isAdmin()) openRemoveModal(id);
   };
   dash.addEventListener('touchend', end);
   dash.addEventListener('touchcancel', end);
@@ -3090,6 +3097,7 @@ let _undoRemove = null;   // { id, prevStatus, timer }
 function openRemoveModal(id) {
   const p = findProspect(id);
   if (!p) return;
+  if (!isAdmin()) { showToast('Removing leads is admin only \u2014 mark it Lost, or ask Michael'); return; }
   if (p.clientId) { alert(`${p.company} has a Client ID (${p.clientId}) and history, so it can't be removed. Mark it Lost instead.`); return; }
   _removeTargetId = id;
   document.getElementById('removeModalName').textContent = p.company;
@@ -3755,10 +3763,42 @@ function setSearchFilter(v) {
   render();
 }
 
+// v1.7: open cards and their sections stay as they were when the list
+// redraws (e.g. after logging a call), for as long as the page is open.
+const openCards = new Set();
+const cardSections = {};   // id -> { 1: bool, 2: bool, 3: bool }
+const SECTION_DEFAULTS = { 1: true, 2: false, 3: true };
 function toggleCard(id) {
   const el = document.getElementById('detail-' + id);
-  if (el) el.classList.toggle('open');
+  if (!el) return;
+  el.classList.toggle('open');
+  if (el.classList.contains('open')) openCards.add(id); else openCards.delete(id);
 }
+function sectionOpen(id, n) {
+  const st = cardSections[id];
+  return st && n in st ? st[n] : SECTION_DEFAULTS[n];
+}
+function secOpen(p, n, title, summary) {
+  const open = sectionOpen(p.id, n);
+  return `<div class="card-sec${open ? ' open' : ''}"><button type="button" class="sec-head" onclick="toggleSection('${p.id}',${n},this)"><span class="sec-arrow">${open ? '&#9662;' : '&#9656;'}</span><span>${title}</span>${summary ? `<small>${summary}</small>` : ''}</button><div class="sec-body">`;
+}
+function toggleSection(id, n, btn) {
+  const sec = btn.parentElement;
+  const open = !sec.classList.contains('open');
+  sec.classList.toggle('open', open);
+  btn.querySelector('.sec-arrow').innerHTML = open ? '&#9662;' : '&#9656;';
+  cardSections[id] = Object.assign({}, cardSections[id], { [n]: open });
+}
+// Section 2 header line, so the key decision maker shows without opening it.
+function contactsSummary(p) {
+  const kdm = [p.contact2Name, p.contact2Role].filter(Boolean).join(' \u00B7 ');
+  const other = [p.contact3Label, p.contact3Name].filter(Boolean).join(': ');
+  return escapeHtml(kdm || other || 'None added');
+}
+// v1.7: only the admin can remove leads (Michael decided: option A, honour
+// system like the Admin folder; request/approve flow banked).
+const ADMIN_BDM = 'Michael Hodnett';
+function isAdmin() { return currentBDM === ADMIN_BDM; }
 
 function toggleLostSection() {
   document.getElementById('lostWrap').classList.toggle('open');
@@ -3821,7 +3861,9 @@ function cardHtml(p) {
       </div>
       <div class="p-top-right">${p.status === 'New Lead' ? '' : `<div class="p-status-badge">${p.status}</div>`}${cardTopButtons(p)}</div>
     </div>
-    <div class="p-detail" id="detail-${p.id}">
+    <div class="p-detail${openCards.has(p.id) ? ' open' : ''}" id="detail-${p.id}">
+      <div class="plan-row"><button class="plan-btn ${planned ? 'on' : ''}" onclick="togglePlan('${p.id}')">${planned ? '&#10003; In today\'s plan \u2014 tap to remove' : '+ Add to today\'s plan'}</button></div>
+      ${secOpen(p, 1, 'Business &amp; site contact', '')}
       <div class="p-field-row">
         <div>
           <label>Company</label>
@@ -3852,7 +3894,6 @@ function cardHtml(p) {
         </div>
         <div></div>
       </div>
-      <div class="plan-row"><button class="plan-btn ${planned ? 'on' : ''}" onclick="togglePlan('${p.id}')">${planned ? '&#10003; In today\'s plan \u2014 tap to remove' : '+ Add to today\'s plan'}</button></div>
       <div class="p-field-row">
         <div>
           <label>Business type</label>
@@ -3929,6 +3970,8 @@ function cardHtml(p) {
         </div>
       </div>
       ${p.contactName ? `<button class="qa-btn" style="width:100%;margin-bottom:4px;" onclick="saveContactVCard('${p.id}',1)">\uD83D\uDCC7 Save Site Contact to phone</button>` : ''}
+      </div></div>
+      ${secOpen(p, 2, 'Key decision maker &amp; other', contactsSummary(p))}
       <div style="margin:12px 0 6px;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:rgba(255,255,255,0.35);">Key decision maker (optional)</div>
       <div class="p-field-row">
         <div>
@@ -3986,6 +4029,8 @@ function cardHtml(p) {
         </div>
       </div>
       ${p.contact3Name ? `<button class="qa-btn" style="width:100%;margin-bottom:4px;" onclick="saveContactVCard('${p.id}',3)">\uD83D\uDCC7 Save ${escapeHtml(p.contact3Label||'Other Contact')} to phone</button>` : ''}
+      </div></div>
+      ${secOpen(p, 3, 'Status &amp; activity', '')}
       <div class="p-field-row">
         <div>
           <label>Status</label>
@@ -4013,7 +4058,8 @@ function cardHtml(p) {
       </div>
       ${p.lostReason ? `<div class="lost-reason-tag">Lost — ${escapeHtml(p.lostReason)}</div>` : ''}
       ${p.status === 'Won' && p.clientId ? `<div style="font-size:11px;color:#4ADE80;margin-top:8px;">Won \u2014 client details are now kept in the Prospect/Client form. Edits here no longer update Client Records.</div>` : ''}
-      <div class="remove-row">${canMarkExistingClient(p) ? `<button class="remove-link" style="color:#64d2ff;margin-right:14px;" onclick="markExistingClient('${p.id}')">Already a BioBlue client</button>` : ''}${p.clientId
+      </div></div>
+      <div class="remove-row">${canMarkExistingClient(p) ? `<button class="remove-link" style="color:#64d2ff;margin-right:14px;" onclick="markExistingClient('${p.id}')">Already a BioBlue client</button>` : ''}${!isAdmin() ? '' : p.clientId
         ? `<span class="remove-blocked">Can't be removed \u2014 it has a Client ID (${escapeHtml(p.clientId)}) and history. Mark it Lost instead.</span>`
         : `<button class="remove-link" onclick="openRemoveModal('${p.id}')">Remove from Tracker</button>`}</div>
     </div>
