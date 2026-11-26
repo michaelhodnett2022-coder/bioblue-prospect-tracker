@@ -422,6 +422,17 @@ body.sheet-open { overflow:hidden; }
 .sheet .type-chip, .sheet .filter-pill { font-size:12.5px;padding:8px 12px;border-radius:18px; }
 .sheet-done { width:100%;margin-top:20px;padding:14px;font-size:14px;border-radius:14px; }
 .new-lead-fields { display:flex;flex-direction:column;gap:8px; }
+/* v2.3 business card scan */
+.scan-btn { width:100%;padding:12px;border-radius:12px;border:1.5px dashed rgba(100,210,255,0.55);background:rgba(100,210,255,0.08);
+  color:#64d2ff;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer; }
+.scan-box { display:none;flex-direction:column;gap:6px; }
+.scan-box.open { display:flex; }
+.scan-hint { font-size:12px;line-height:1.45;color:rgba(255,255,255,0.65); }
+.sheet textarea { width:100%;padding:11px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.07);
+  color:white;font-family:'DM Sans',sans-serif;font-size:16px;resize:vertical;min-height:96px; }
+.sheet textarea::placeholder { color:rgba(255,255,255,0.4); }
+.nl-state { flex:0 0 84px !important; }
+.nl-postcode { flex:0 0 84px !important; }
 .menu-item { display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:13px 4px;background:none;border:none;
   border-bottom:1px solid rgba(255,255,255,0.07);color:white;font-family:'DM Sans',sans-serif;font-size:14.5px;font-weight:600;cursor:pointer;text-decoration:none; }
 .menu-item:last-child { border-bottom:none; }
@@ -577,14 +588,27 @@ body.sheet-open { overflow:hidden; }
     <div class="sheet-grip"></div>
     <div class="sheet-head"><h3>Add new lead</h3><button class="link-btn" onclick="closeSheet('newLeadSheet')">Cancel</button></div>
     <div class="new-lead-fields" id="newLeadFields">
+      <button type="button" class="scan-btn" onclick="toggleCardScan()">&#128199; Scan business card</button>
+      <div class="scan-box" id="scanBox">
+        <div class="scan-hint">Tap the box below, tap it again, choose <b>Scan Text</b>, point at the card, then <b>Insert</b>. The details fill in below &mdash; check them before adding.</div>
+        <textarea id="nlScanText" placeholder="Card text lands here (or paste it)" autocomplete="off" oninput="cardScanInput()"></textarea>
+        <button type="button" class="btn btn-ghost" style="margin-top:0;padding:10px;" onclick="fillFromCard(true)">Fill details from card</button>
+      </div>
       <input type="text" id="nlCompany" placeholder="Company name">
       <div class="sheet-row">
-        <select id="nlState"></select>
-        <input type="text" id="nlContactName" placeholder="Contact (optional)">
+        <input type="text" id="nlContactName" placeholder="Contact (optional)" autocomplete="off">
+        <input type="text" id="nlContactRole" placeholder="Role (optional)" autocomplete="off">
       </div>
       <div class="sheet-row">
-        <input type="text" id="nlContactPhone" placeholder="Phone (optional)">
-        <input type="text" id="nlContactEmail" placeholder="Email (optional)">
+        <input type="text" id="nlContactMobile" placeholder="Mobile (optional)" inputmode="tel" autocomplete="off">
+        <input type="text" id="nlContactPhone" placeholder="Office phone (optional)" inputmode="tel" autocomplete="off">
+      </div>
+      <input type="text" id="nlContactEmail" placeholder="Email (optional)" inputmode="email" autocomplete="off">
+      <input type="text" id="nlStreet" placeholder="Street address (optional)" autocomplete="chrome-off">
+      <div class="sheet-row">
+        <input type="text" id="nlSuburb" placeholder="Suburb" autocomplete="chrome-off">
+        <select id="nlState" class="nl-state" autocomplete="chrome-off"></select>
+        <input type="text" id="nlPostcode" class="nl-postcode" placeholder="P/code" inputmode="numeric" autocomplete="chrome-off">
       </div>
       <div class="sheet-row" style="margin-top:8px;">
         <button class="btn btn-ghost sheet-done" style="margin-top:0;" onclick="addNewLead(false)">Add to Cold</button>
@@ -1304,12 +1328,13 @@ function generateVCardFile(name, role, phone, email, company, address, note, mob
   }
 }
 
-function saveContactVCard(id, slot) {
+function saveContactVCard(id, slot, nameFallback) {
   const p = findProspect(id);
   if (!p) return;
   const address = [p.streetAddress, p.suburb, p.state, p.postcode].filter(Boolean).join(', ');
   const note = 'BioBlue prospect contact \u2014 ' + (p.company || '') + '. Added by ' + (p.bdm || '') + '.';
-  if (slot === 1) generateVCardFile(p.contactName, p.contactRole, p.contactPhone, p.contactEmail, p.company, address, note, p.contactMobile || '');
+  // v2.3: a scanned card with no name still saves (under the company name)
+  if (slot === 1) generateVCardFile(p.contactName || (nameFallback ? p.company : ''), p.contactRole, p.contactPhone, p.contactEmail, p.company, address, note, p.contactMobile || '');
   else if (slot === 2) generateVCardFile(p.contact2Name, p.contact2Role, p.contact2Phone, p.contact2Email, p.company, address, note);
   else if (slot === 3) generateVCardFile(p.contact3Name, p.contact3Label, p.contact3Phone, p.contact3Email, p.company, address, note);
 }
@@ -3209,6 +3234,7 @@ function closeSheet(id) {
   if (!document.querySelector('.sheet-overlay.open')) document.body.classList.remove('sheet-open');
 }
 function openNewLead() {
+  if (!document.getElementById('nlScanText').value.trim()) cardScanUsed = false;   // v2.3
   openSheet('newLeadSheet');
   setTimeout(() => document.getElementById('nlCompany').focus(), 280);
 }
@@ -3240,8 +3266,10 @@ function toggleAdminTools() {
   document.getElementById('adminChevron').innerHTML = open ? '&#9662;' : '&#9656;';
 }
 
+const NL_FIELDS = ['nlCompany','nlContactName','nlContactRole','nlContactMobile','nlContactPhone','nlContactEmail','nlStreet','nlSuburb','nlPostcode','nlScanText'];
 function addNewLead(toPipeline) {
-  const company = document.getElementById('nlCompany').value.trim();
+  const v = id => document.getElementById(id).value.trim();
+  const company = v('nlCompany');
   if (!company) { showToast('Company name is required'); return; }
   if (!document.getElementById('nlState').value) { showToast('Select a state for this lead'); return; }
   const p = {
@@ -3249,9 +3277,14 @@ function addNewLead(toPipeline) {
     company,
     state: document.getElementById('nlState').value,
     bdm: currentBDM,
-    contactName: document.getElementById('nlContactName').value.trim(),
-    contactPhone: document.getElementById('nlContactPhone').value.trim(),
-    contactEmail: document.getElementById('nlContactEmail').value.trim(),
+    contactName: v('nlContactName'),
+    contactRole: v('nlContactRole'),
+    contactMobile: v('nlContactMobile'),
+    contactPhone: v('nlContactPhone'),
+    contactEmail: v('nlContactEmail'),
+    streetAddress: v('nlStreet'),
+    suburb: v('nlSuburb'),
+    postcode: v('nlPostcode'),
     status: toPipeline ? 'Targeted' : 'New Lead',
     activity: toPipeline ? [{ date: todayStr(), type: 'note', text: `Added to pipeline \u2014 no contact yet (${currentBDM})` }] : [],
     nextFollowUp: null,
@@ -3259,13 +3292,219 @@ function addNewLead(toPipeline) {
     createdDate: todayStr(),
     clientId: null
   };
+  // v2.3: drop empty optional fields so the lead looks the same as before when not used
+  ['contactRole','contactMobile','streetAddress','suburb','postcode'].forEach(k => { if (!p[k]) delete p[k]; });
   if (toPipeline) p.pipelineAddedDate = todayStr();
+  // v2.3: warn before adding something already in the Tracker or Client Records
+  const dupe = newLeadDuplicate(p);
+  if (dupe && !confirm(`Possible duplicate:\n${dupe}\n\nAdd anyway?`)) { showToast('Not added \u2014 nothing changed'); return; }
+  const fromScan = cardScanUsed;
+  if (fromScan) {
+    const sw = (cardScanWebsite || '').trim();
+    p.activity.push({ date: todayStr(), type: 'note', text: `Added from business card scan (${currentBDM})` + (sw ? ` \u2014 website ${sw}` : '') });
+  }
   prospects.unshift(p);
-  ['nlCompany','nlContactName','nlContactPhone','nlContactEmail'].forEach(id => document.getElementById(id).value = '');
+  NL_FIELDS.forEach(id => document.getElementById(id).value = '');
+  resetCardScan();
   saveTracker();
   closeSheet('newLeadSheet');
   render();
+  // v2.3: scanned card → iPhone contact card opens (tap Create New Contact). Same tap, so iOS allows it.
+  if (fromScan) saveContactVCard(p.id, 1, true);
   showToast(toPipeline ? `${company} added to Pipeline (Targeted)` : 'Added to Cold \u2014 log a call, email or visit to move it into Pipeline');
+}
+
+// v2.3: duplicate check for the Add new lead sheet. Same matching as import
+// (company / phone / street), plus email. Returns a line to show, or ''.
+function newLeadDuplicate(p) {
+  const sig = leadSig(p);
+  const email = (p.contactEmail || '').toLowerCase();
+  const stat = x => x.status === 'New Lead' ? 'Cold' : (x.status || '');
+  for (const x of allLeads()) {
+    if (x.status === 'Removed') continue;
+    const emails = [x.contactEmail, x.contact2Email, x.contact3Email].map(e => (e || '').toLowerCase()).filter(Boolean);
+    if ((email && emails.includes(email)) || matchLevel(sig, leadSig(x)) === 'same') return `${x.company} \u2014 already in the Tracker (${stat(x)}, ${x.bdm || 'no BDM'})`;
+  }
+  const cm = findClientMatch(sig, clientSigs());
+  if (cm && cm.level === 'same') return `${cm.c.label} \u2014 ${cm.c.kind}`;
+  for (const x of allLeads()) {
+    if (x.status !== 'Removed' && matchLevel(sig, leadSig(x)) === 'possible') return `${x.company} \u2014 similar name in the Tracker (${stat(x)}, ${x.bdm || 'no BDM'})`;
+  }
+  if (cm) return `${cm.c.label} \u2014 similar name, ${cm.c.kind}`;
+  return '';
+}
+
+// =====================================================================
+// v2.3 BUSINESS CARD SCAN — iPhone Live Text ("Scan Text") types the card
+// into a box; parseCardText sorts it into the Add new lead fields. Always
+// a best guess — the fields stay editable and nothing saves until Add.
+// =====================================================================
+let cardScanUsed = false, cardScanWebsite = '', _cardScanTimer = null;
+function toggleCardScan() {
+  const box = document.getElementById('scanBox');
+  const open = !box.classList.contains('open');
+  box.classList.toggle('open', open);
+  if (open) setTimeout(() => document.getElementById('nlScanText').focus(), 50);
+}
+function resetCardScan() {
+  cardScanUsed = false; cardScanWebsite = '';
+  clearTimeout(_cardScanTimer);
+  document.getElementById('scanBox').classList.remove('open');
+}
+function cardScanInput() {
+  clearTimeout(_cardScanTimer);
+  _cardScanTimer = setTimeout(() => fillFromCard(false), 700);
+}
+function fillFromCard(manual) {
+  clearTimeout(_cardScanTimer);
+  const text = document.getElementById('nlScanText').value;
+  if (!text.trim()) { if (manual) showToast('Scan or paste the card text first'); return; }
+  const r = parseCardText(text);
+  const map = { nlCompany: r.company, nlContactName: r.name, nlContactRole: r.role, nlContactMobile: r.mobile, nlContactPhone: r.office,
+    nlContactEmail: r.email, nlStreet: r.street, nlSuburb: r.suburb, nlPostcode: r.postcode };
+  let n = 0;
+  Object.keys(map).forEach(id => { if (map[id]) { document.getElementById(id).value = map[id]; n++; } });
+  if (r.state) { document.getElementById('nlState').value = r.state; n++; }
+  cardScanWebsite = r.website || '';
+  if (n) cardScanUsed = true;
+  showToast(n ? 'Card read \u2014 check the details, then Add' : 'Couldn\u2019t read that \u2014 type the details in');
+}
+
+const CARD_ROLE_RE = /\b(manager|director|owner|ceo|cfo|coo|cto|founder|co-?founder|supervisor|co-?ordinator|officer|engineer|superintendent|foreman|administrator|admin|accountant|sales|operations|fleet|workshop|procurement|purchasing|buyer|executive|partner|principal|consultant|representative|rep|lead|head|president|gm|logistics|dispatch|controller|specialist|technician|mechanic|estimator|planner|analyst|assistant|secretary|proprietor|leading hand|account)\b/i;
+const CARD_CO_RE = /\b(pty|ltd|limited|group|transport|transports|logistics|haulage|haulers|services|mining|minerals|civil|contracting|contractors|industries|holdings|enterprises|drilling|earthmoving|quarry|quarries|bus|buses|coaches|coachlines|fuel|fuels|petroleum|oil|council|shire|construction|constructions|engineering|freight|trucking|trucks|express|australia|australian|resources|plant|hire|waste|recycling|farms|pastoral|co\.|& sons|&sons|inc)\b/i;
+const CARD_FREE_MAIL = /^(gmail|googlemail|outlook|hotmail|live|msn|yahoo|ymail|icloud|me|mac|bigpond|iinet|optusnet|tpg|internode|westnet|dodo|aapt|telstra|protonmail|proton)\./i;
+const CARD_STREET_RE = /\b(st|street|rd|road|ave|avenue|dr|drive|hwy|highway|way|crt|ct|court|pl|place|cres|crescent|bvd|blvd|boulevard|pde|parade|lane|ln|tce|terrace|cl|close|cct|circuit|loop|esp|esplanade|gr|grove|pkwy|parkway|sq|square|mews)\b\.?/i;
+
+function cardTitleCase(s) {
+  if (!s || s !== s.toUpperCase() || !/[A-Z]{2}/.test(s)) return s;
+  return s.toLowerCase().replace(/(^|[\s\-'\u2019(])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\bMc([a-z])/g, (m, a) => 'Mc' + a.toUpperCase());
+}
+function cardFmtPhone(d) {
+  // d = digits, AU local form starting 0 (or 13/1300/1800)
+  if (/^04\d{8}$/.test(d)) return d.slice(0,4) + ' ' + d.slice(4,7) + ' ' + d.slice(7);
+  if (/^0[2378]\d{8}$/.test(d)) return d.slice(0,2) + ' ' + d.slice(2,6) + ' ' + d.slice(6);
+  if (/^1[38]00\d{6}$/.test(d)) return d.slice(0,4) + ' ' + d.slice(4,7) + ' ' + d.slice(7);
+  if (/^13\d{4}$/.test(d)) return d.slice(0,2) + ' ' + d.slice(2,4) + ' ' + d.slice(4);
+  return d;
+}
+
+function parseCardText(text) {
+  const out = { name:'', role:'', company:'', email:'', mobile:'', office:'', website:'', street:'', suburb:'', state:'', postcode:'' };
+  let lines = (text || '').replace(/\r/g, '').split('\n')
+    .flatMap(l => l.split(/\s+[|\u2022\u00b7\u2013\u2014]\s+|\s{3,}/))
+    .map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const used = new Set();
+  // Email
+  lines.forEach((l, i) => {
+    const m = l.match(/[A-Z0-9._%+'-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    if (m && !out.email) { out.email = m[0].toLowerCase(); if (l.replace(m[0], '').replace(/^(e|email|e-mail)\s*[:.]?\s*/i, '').trim().length < 3) used.add(i); }
+  });
+  // Website
+  lines.forEach((l, i) => {
+    if (out.website) return;
+    const m = l.replace(/\S+@\S+/g, ' ').match(/\b((?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com\.au|net\.au|org\.au|gov\.au|edu\.au|asn\.au|com|net|org|au|biz|co|io)(?:\/\S*)?)\b/i);
+    if (m && (/www\.|https?:/i.test(m[1]) || !/\s/.test(l.trim()) || /^(w|web|website)\s*[:.]/i.test(l))) {
+      out.website = m[1].replace(/^https?:\/\//i, '');
+      if (l.replace(m[0], '').replace(/^(w|web|website)\s*[:.]?\s*/i, '').trim().length < 3) used.add(i);
+    }
+  });
+  // Phones (labels win; otherwise 04 = mobile, everything else = office; fax ignored)
+  const PH_RE = /(?:\+?\s?61[\s.-]?\(?0?\)?[\s.-]?[2-478](?:[\s.-]?\d){8}|\(?0[2-478]\)?(?:[\s.-]?\d){8}|1[38]00(?:[\s.-]?\d){6}|\b13(?:[\s.-]?\d){4}\b)/g;
+  lines.forEach((l, i) => {
+    const found = l.match(PH_RE);
+    if (!found) return;
+    // split the line into labelled chunks so "M 0412 345 678  P 08 9452 1234" works
+    let rest = l;
+    found.forEach(raw => {
+      const at = rest.indexOf(raw);
+      const before = rest.slice(0, at);
+      rest = rest.slice(at + raw.length);
+      const lab = (before.match(/([a-z]+)\s*[:.]?\s*\(?\s*$/i) || [,''])[1].toLowerCase();
+      let d = raw.replace(/\D/g, '');
+      if (d.startsWith('61')) { d = d.slice(2); if (d.startsWith('0')) d = d.slice(1); d = '0' + d; }
+      const ph = cardFmtPhone(d);
+      if (/^(f|fax|facsimile)$/.test(lab)) return;
+      const isMob = /^(m|mob|mobile|cell|c)$/.test(lab) || (!/^(p|ph|phone|t|tel|telephone|o|office|w|work|d|direct|dir|b|bus)$/.test(lab) && /^04/.test(d));
+      if (isMob) { if (!out.mobile) out.mobile = ph; else if (!out.office) out.office = ph; }
+      else { if (!out.office) out.office = ph; else if (!out.mobile && /^04/.test(d)) out.mobile = ph; }
+    });
+    if (rest.replace(/[^a-z]/gi, '').length < 3 || l.replace(PH_RE, '').replace(/\b(m|mob|mobile|cell|c|p|ph|phone|t|tel|telephone|o|office|w|work|d|direct|f|fax|b|bus)\b\s*[:.]?/gi, '').replace(/[\s:./()+-]/g, '').length < 3) used.add(i);
+  });
+  // Address: line with STATE + postcode (or STATE at the end)
+  const ST_RE = /\b(NSW|VIC|QLD|WA|SA|TAS|NT|ACT|Western Australia|Northern Territory|Queensland|New South Wales|Victoria|South Australia|Tasmania)\b\.?,?\s*(\d{4})?\s*$/i;
+  const ST_FULL = { 'western australia':'WA','northern territory':'NT','queensland':'QLD','new south wales':'NSW','victoria':'VIC','south australia':'SA','tasmania':'TAS' };
+  for (let i = 0; i < lines.length; i++) {
+    if (used.has(i)) continue;
+    const l = lines[i].replace(/,?\s*Australia\s*$/i, '');
+    const m = l.match(ST_RE);
+    if (!m || (!m[2] && !/,|\d/.test(l))) continue;
+    const st = m[1].toUpperCase();
+    out.state = ST_FULL[m[1].toLowerCase()] || st;
+    out.postcode = m[2] || '';
+    let pre = l.slice(0, m.index).replace(/^(a|addr|address|po|postal)\s*[:.]\s*/i, '').replace(/[,\s]+$/, '').trim();
+    used.add(i);
+    if (pre.includes(',')) {
+      const k = pre.lastIndexOf(',');
+      out.street = pre.slice(0, k).trim(); out.suburb = pre.slice(k + 1).trim();
+    } else {
+      const sm = pre.match(new RegExp('^(.*' + CARD_STREET_RE.source + ')\\s+(.+)$', 'i'));
+      if (sm && /\d/.test(sm[1])) { out.street = sm[1].trim(); out.suburb = sm[sm.length - 1].trim(); }
+      else if (/^(po box|locked bag|gpo box)/i.test(pre) || /\d/.test(pre)) {
+        const pm = pre.match(/^((?:po box|locked bag|gpo box)\s*\d+|[^a-z]*\d[^,]*?)\s+([A-Za-z][A-Za-z '-]+)$/i);
+        if (pm) { out.street = pm[1].trim(); out.suburb = pm[2].trim(); } else out.street = pre;
+      } else out.suburb = pre;
+    }
+    // street on the line above?
+    if (!out.street && i > 0 && !used.has(i - 1) && /\d/.test(lines[i - 1]) && (CARD_STREET_RE.test(lines[i - 1]) || /^(po box|unit|lot|level|shed)/i.test(lines[i - 1])) && !lines[i - 1].match(PH_RE)) {
+      out.street = lines[i - 1].replace(/,\s*$/, ''); used.add(i - 1);
+    }
+    out.street = cardTitleCase(out.street); out.suburb = cardTitleCase(out.suburb);
+    break;
+  }
+  // Skip ABN / ACN / taglines with digits
+  lines.forEach((l, i) => { if (/^(abn|acn)\b/i.test(l) || /\d{2}\s?\d{3}\s?\d{3}\s?\d{3}/.test(l)) used.add(i); });
+  // Role
+  const free = () => lines.map((l, i) => ({ l, i })).filter(x => !used.has(x.i) && !/@|\d{3}/.test(x.l));
+  let roleIdx = -1;
+  for (const x of free()) {
+    if (CARD_ROLE_RE.test(x.l) && x.l.split(' ').length <= 7 && !/\b(pty|ltd)\b/i.test(x.l)) { out.role = cardTitleCase(x.l.replace(/^[,\s-]+|[,\s-]+$/g, '')); roleIdx = x.i; used.add(x.i); break; }
+  }
+  // Company: line with company words, else email/website domain
+  for (const x of free()) {
+    if (CARD_CO_RE.test(x.l) && x.l.split(' ').length <= 8) { out.company = cardTitleCase(x.l); used.add(x.i); break; }
+  }
+  // Name: 2-4 words, letters only, prefer one that matches the email's local part or sits next to the role
+  const local = (out.email.split('@')[0] || '').toLowerCase().replace(/[^a-z]/g, ' ');
+  const cands = free().filter(x => {
+    const w = x.l.replace(/[.,]/g, '').split(' ');
+    return w.length >= 2 && w.length <= 4 && /^[A-Za-z' .,-]+$/.test(x.l) && !CARD_CO_RE.test(x.l) && !CARD_ROLE_RE.test(x.l);
+  });
+  const score = x => {
+    let sc = 0;
+    const w = x.l.toLowerCase().replace(/[^a-z ]/g, '').split(' ').filter(t => t.length > 1);
+    if (local && w.some(t => local.includes(t))) sc += 5;
+    if (roleIdx >= 0 && Math.abs(x.i - roleIdx) === 1) sc += 3;
+    if (x.l.split(' ').every(t => /^[A-Z]/.test(t))) sc += 1;
+    return sc;
+  };
+  if (cands.length) {
+    const best = cands.slice().sort((a, b) => score(b) - score(a) || a.i - b.i)[0];
+    out.name = cardTitleCase(best.l.replace(/[,]+$/, '')); used.add(best.i);
+  }
+  if (!out.company) {
+    const dom = (out.email.split('@')[1] || out.website.replace(/^www\./i, '').split('/')[0] || '');
+    if (dom && !CARD_FREE_MAIL.test(dom)) {
+      const label = dom.split('.')[0];
+      // prefer a leftover line that contains the domain word (e.g. logo text)
+      const hit = free().find(x => x.l.toLowerCase().replace(/[^a-z0-9]/g, '').includes(label.toLowerCase()) && x.l.split(' ').length <= 6);
+      out.company = hit ? cardTitleCase(hit.l) : label.charAt(0).toUpperCase() + label.slice(1);
+      if (hit) used.add(hit.i);
+    } else {
+      const left = free().find(x => x.l.split(' ').length <= 6 && /[a-z]/i.test(x.l));
+      if (left) { out.company = cardTitleCase(left.l); used.add(left.i); }
+    }
+  }
+  return out;
 }
 
 // =====================================================================
