@@ -790,18 +790,22 @@ let gdriveToken = null;
 // app reconnects without tapping Load. Expired or rejected (401) -> cleared;
 // the next tap asks Google again quietly (prompt: '').
 let gdriveTokenExp = 0;
-const TOKEN_STORE = 'bb_tracker_gtoken';
+// v2.2: shared with the Hub and every form (same site, same Google client) —
+// sign in once in any Field Tools app. Old Tracker-only key tidied away.
+const TOKEN_STORE = 'bb_gtoken';
+try { localStorage.removeItem('bb_tracker_gtoken'); } catch (e) {}
 function clearToken() {
   gdriveToken = null; gdriveTokenExp = 0;
   try { localStorage.removeItem(TOKEN_STORE); } catch (e) {}
 }
 function tokenLive() {
   if (gdriveToken && Date.now() < gdriveTokenExp) return true;
-  if (gdriveToken && gdriveTokenExp) clearToken();
+  // Check the shared store before clearing: another app may have signed in since.
   try {
     const s = JSON.parse(localStorage.getItem(TOKEN_STORE) || 'null');
     if (s && s.t && Date.now() < s.exp) { gdriveToken = s.t; gdriveTokenExp = s.exp; return true; }
   } catch (e) {}
+  clearToken();   // nothing valid here or in the store (an expired entry is removed)
   return false;
 }
 const _rawFetch = window.fetch.bind(window);
@@ -922,7 +926,7 @@ async function ensureToken() {
       callback: r => {
         if (r.access_token) {
           gdriveToken = r.access_token;
-          gdriveTokenExp = Date.now() + ((Number(r.expires_in) || 3600) - 120) * 1000;
+          gdriveTokenExp = Date.now() + ((Number(r.expires_in) || 3600) - 600) * 1000;   // v2.2: 10-min margin, same as the forms
           try { localStorage.setItem(TOKEN_STORE, JSON.stringify({ t: gdriveToken, exp: gdriveTokenExp })); } catch (e) {}
           updateConnDot();
           resolve();
@@ -981,7 +985,7 @@ function getSeedProspects() {
 const CLIENT_RECORDS_HEADERS = [
   'Client ID','Billing Entity','Site Name','Site Location Name','Descriptor','Trackpod Name',
   'Street Address','Suburb','State','Postcode',
-  'Business Contact Name','Business Contact Role','Business Contact Email','Business Contact Phone',
+  'Business Contact Name','Business Contact Role','Business Contact Email','Business Contact Phone','Business Contact Office Phone',
   'KDM Name','KDM Role','KDM Email','KDM Phone',
   'Logistics Name','Logistics Role','Logistics Email','Logistics Phone',
   'Admin Contact Name','Admin Contact Role','Admin Contact Email','Admin Contact Phone',
@@ -1044,6 +1048,12 @@ async function getDriveRootId() {
 // quote is needed for this lead, and writes a Client Records row with
 // 'Prospect ✓' already set — so Quote Builder's existing gate passes
 // with zero changes to that file. Returns the new Client ID.
+// v2.2: suite-wide 26 Nov 2026 — Business Contact Phone = site contact MOBILE,
+// new Business Contact Office Phone column. Added to the sheet's header row if
+// it isn't there yet (the forms self-heal the same way).
+function ensureOfficePhoneCol(rows, headers) {
+  if (rows.length && !headers.includes('Business Contact Office Phone')) { headers.push('Business Contact Office Phone'); rows[0] = headers; }
+}
 async function mintClientId(p) {
   const rootId = await getDriveRootId();
   const prospectsId = await getOrCreateFolder(rootId, PROSPECTS_FOLDER);
@@ -1057,6 +1067,7 @@ async function mintClientId(p) {
   const ws = wb.Sheets['Client Records'];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
   const headers = rows[0] || CLIENT_RECORDS_HEADERS;
+  ensureOfficePhoneCol(rows, headers);
 
   const idCol = headers.indexOf('Client ID');
   const existingIds = rows.slice(1).map(r => r[idCol]).filter(Boolean);
@@ -1078,7 +1089,8 @@ async function mintClientId(p) {
   set('Business Contact Name', p.contactName || '');
   set('Business Contact Role', p.contactRole || '');
   set('Business Contact Email', p.contactEmail || '');
-  set('Business Contact Phone', p.contactPhone || '');
+  set('Business Contact Phone', p.contactMobile || '');
+  set('Business Contact Office Phone', p.contactPhone || '');
   set('KDM Name', p.contact2Name || '');
   set('KDM Role', p.contact2Role || '');
   set('KDM Email', p.contact2Email || '');
@@ -1124,7 +1136,7 @@ async function mintClientId(p) {
 const CLIENT_RECORD_SYNCED_FIELDS = new Set([
   'company', 'descriptor', 'streetAddress', 'suburb', 'state', 'postcode',
   'productInterest', 'currentSupplier', 'estimatedVolumeLitres', 'estimatedVolumePeriod',
-  'contactName', 'contactRole', 'contactEmail', 'contactPhone',
+  'contactName', 'contactRole', 'contactEmail', 'contactPhone', 'contactMobile',
   'contact2Name', 'contact2Role', 'contact2Email', 'contact2Phone',
   'contact3Label', 'contact3Name', 'contact3Role', 'contact3Email', 'contact3Phone'
 ]);
@@ -1147,7 +1159,10 @@ function applyProspectToClientRow(p, row, headers) {
   set('Business Contact Name', p.contactName || '');
   set('Business Contact Role', p.contactRole || '');
   set('Business Contact Email', p.contactEmail || '');
-  set('Business Contact Phone', p.contactPhone || '');
+  // Phones only written when the Tracker has one, so a mobile/office number
+  // typed into a form isn't wiped by a Tracker edit.
+  if (p.contactMobile) set('Business Contact Phone', p.contactMobile);
+  if (p.contactPhone) set('Business Contact Office Phone', p.contactPhone);
   set('KDM Name', p.contact2Name || '');
   set('KDM Role', p.contact2Role || '');
   set('KDM Email', p.contact2Email || '');
@@ -1176,6 +1191,7 @@ async function pushProspectsToClientRecords(list) {
   const ws = wb.Sheets['Client Records'];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
   const headers = rows[0] || CLIENT_RECORDS_HEADERS;
+  ensureOfficePhoneCol(rows, headers);
   const idCol = headers.indexOf('Client ID');
 
   let changed = false;
@@ -2409,7 +2425,7 @@ async function loadClientNames() {
       if (nm && !seen.has(normKey(nm))) seen.set(normKey(nm), nm);
       const site = String(r['Site Name'] || '').trim();
       if (!nm && !site) return;
-      const phones = ['Business Contact Phone', 'KDM Phone', 'Logistics Phone', 'Admin Contact Phone', 'Contact Mobile', 'Other Contact Phone']
+      const phones = ['Business Contact Phone', 'Business Contact Office Phone', 'KDM Phone', 'Logistics Phone', 'Admin Contact Phone', 'Contact Mobile', 'Other Contact Phone']
         .map(h => phoneKey(r[h])).filter(Boolean);
       recs.push({ id: String(r['Client ID'] || ''), n: nm, s: site, sub: String(r['Suburb'] || ''), st: String(r['State'] || ''),
         a: addrKey(r['Street Address'], r['Suburb']), ph: [...new Set(phones)], cust: !!String(r['Customer \u2713'] || '').trim() });
@@ -3538,7 +3554,8 @@ function promoteToClient(id) {
     promote: '1',
     company: p.company || '',
     contactName: p.contactName || '',
-    contactPhone: p.contactPhone || '',
+    contactPhone: p.contactMobile || '',          // Prospect form: Mobile
+    contactOfficePhone: p.contactPhone || '',     // Prospect form: Office phone
     contactEmail: p.contactEmail || '',
     state: p.state || '',
     trackerId: p.id
