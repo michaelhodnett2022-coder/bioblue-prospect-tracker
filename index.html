@@ -432,6 +432,21 @@ body.sheet-open { overflow:hidden; }
   color:white;font-family:'DM Sans',sans-serif;font-size:16px;resize:vertical;min-height:96px; }
 .sheet textarea::placeholder { color:rgba(255,255,255,0.4); }
 .nl-state { flex:0 0 84px !important; }
+/* v2.4 card camera (from the Card & Doc Scanner) */
+.cam-overlay { position:fixed;inset:0;z-index:400;background:#000;display:none;flex-direction:column; }
+.cam-overlay.open { display:flex; }
+.cam-top { display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top) + 10px) 16px 10px;color:white; }
+.cam-top h3 { font-size:16px; }
+.cam-wrap { position:relative;flex:1;overflow:hidden;background:#000; }
+.cam-wrap video { position:absolute;inset:0;width:100%;height:100%;object-fit:cover; }
+.cam-finder { position:absolute;left:6%;right:6%;top:50%;transform:translateY(-50%);aspect-ratio:1.75;border:2.5px solid #64d2ff;border-radius:14px;
+  box-shadow:0 0 0 2000px rgba(0,0,0,0.45); }
+.cam-hint { position:absolute;left:0;right:0;bottom:14px;text-align:center;color:white;font-size:13px;text-shadow:0 1px 3px #000; }
+.cam-controls { display:flex;align-items:center;justify-content:space-around;padding:16px 16px calc(env(safe-area-inset-bottom) + 18px); }
+.cam-side { width:48px;height:48px;border-radius:24px;border:none;background:rgba(255,255,255,0.15);color:white;font-size:20px;cursor:pointer; }
+.cam-shutter { width:72px;height:72px;border-radius:36px;border:5px solid white;background:#64d2ff;cursor:pointer; }
+.cam-shutter:disabled { opacity:.4; }
+.cam-status { color:white;text-align:center;font-size:13.5px;min-height:20px;padding:0 16px; }
 .nl-postcode { flex:0 0 84px !important; }
 .menu-item { display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:13px 4px;background:none;border:none;
   border-bottom:1px solid rgba(255,255,255,0.07);color:white;font-family:'DM Sans',sans-serif;font-size:14.5px;font-weight:600;cursor:pointer;text-decoration:none; }
@@ -588,10 +603,10 @@ body.sheet-open { overflow:hidden; }
     <div class="sheet-grip"></div>
     <div class="sheet-head"><h3>Add new lead</h3><button class="link-btn" onclick="closeSheet('newLeadSheet')">Cancel</button></div>
     <div class="new-lead-fields" id="newLeadFields">
-      <button type="button" class="scan-btn" onclick="toggleCardScan()">&#128199; Scan business card</button>
+      <button type="button" class="scan-btn" onclick="openCardCamera()">&#128199; Scan business card</button>
       <div class="scan-box" id="scanBox">
-        <div class="scan-hint">Tap the box below, tap it again, choose <b>Scan Text</b>, point at the card, then <b>Insert</b>. The details fill in below &mdash; check them before adding.</div>
-        <textarea id="nlScanText" placeholder="Card text lands here (or paste it)" autocomplete="off" oninput="cardScanInput()"></textarea>
+        <div class="scan-hint">Text read from the card. Fix any misreads here and tap <b>Fill details from card</b> &mdash; or just correct the boxes below.</div>
+        <textarea id="nlScanText" placeholder="Card text appears here after a scan (you can also paste)" autocomplete="off"></textarea>
         <button type="button" class="btn btn-ghost" style="margin-top:0;padding:10px;" onclick="fillFromCard(true)">Fill details from card</button>
       </div>
       <input type="text" id="nlCompany" placeholder="Company name">
@@ -768,6 +783,21 @@ body.sheet-open { overflow:hidden; }
   </div>
 </div>
 
+<div class="cam-overlay" id="camOverlay">
+  <div class="cam-top"><h3>&#128199; Scan business card</h3><button class="link-btn" onclick="closeCardCamera()">Cancel</button></div>
+  <div class="cam-wrap">
+    <video id="camVideo" playsinline muted autoplay></video>
+    <div class="cam-finder" id="camFinder"></div>
+    <div class="cam-hint" id="camHint">Fill the box with the card, then tap the button</div>
+  </div>
+  <div class="cam-status" id="camStatus"></div>
+  <div class="cam-controls">
+    <button class="cam-side" id="camPick" onclick="document.getElementById('camFile').click()" title="Use a photo">&#128444;&#65039;</button>
+    <button class="cam-shutter" id="camShutter" onclick="cardCameraShutter()" aria-label="Capture"></button>
+    <span style="width:48px"></span>
+  </div>
+  <input type="file" id="camFile" accept="image/*" style="display:none" onchange="cardCameraFile(this)">
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -3339,24 +3369,148 @@ function newLeadDuplicate(p) {
 // into a box; parseCardText sorts it into the Add new lead fields. Always
 // a best guess — the fields stay editable and nothing saves until Add.
 // =====================================================================
-let cardScanUsed = false, cardScanWebsite = '', _cardScanTimer = null;
-function toggleCardScan() {
-  const box = document.getElementById('scanBox');
-  const open = !box.classList.contains('open');
-  box.classList.toggle('open', open);
-  if (open) setTimeout(() => document.getElementById('nlScanText').focus(), 50);
-}
+let cardScanUsed = false, cardScanWebsite = '';
 function resetCardScan() {
   cardScanUsed = false; cardScanWebsite = '';
-  clearTimeout(_cardScanTimer);
   document.getElementById('scanBox').classList.remove('open');
 }
-function cardScanInput() {
-  clearTimeout(_cardScanTimer);
-  _cardScanTimer = setTimeout(() => fillFromCard(false), 700);
+
+// ---- v2.4 camera + on-phone OCR (camera, crop and clean-up from Michael's
+// Card & Doc Scanner; Tesseract.js 5.1.1 loaded only when Scan is tapped —
+// engine + English data (~10 MB) download once, then the browser caches them).
+// readCardImage() is the only OCR call: swap its body for Google Vision later.
+let _camStream = null, _camBusy = false, _ocrWorker = null, _tessLoad = null;
+const TESSERACT_SRC = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+function camStatus(t) { document.getElementById('camStatus').textContent = t || ''; }
+async function openCardCamera() {
+  const ov = document.getElementById('camOverlay');
+  ov.classList.add('open');
+  document.getElementById('camShutter').disabled = false;
+  document.getElementById('camHint').style.display = '';
+  camStatus('Starting camera\u2026');
+  loadTesseract().catch(() => {});            // start the download while you line up the card
+  stopCardCamera();
+  try {
+    _camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false
+    });
+    const v = document.getElementById('camVideo');
+    v.srcObject = _camStream;
+    await v.play();
+    camStatus('');
+  } catch (e) {
+    camStatus('Camera unavailable \u2014 tap \uD83D\uDDBC\uFE0F to use a photo instead.');
+  }
 }
+function stopCardCamera() {
+  if (_camStream) { _camStream.getTracks().forEach(t => t.stop()); _camStream = null; }
+  const v = document.getElementById('camVideo');
+  if (v) v.srcObject = null;
+}
+function closeCardCamera() {
+  if (_camBusy) return;
+  stopCardCamera();
+  document.getElementById('camOverlay').classList.remove('open');
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden && !_camBusy) closeCardCamera(); });
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve();
+  if (_tessLoad) return _tessLoad;
+  _tessLoad = new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = TESSERACT_SRC;
+    sc.onload = res;
+    sc.onerror = () => { _tessLoad = null; rej(new Error('Card reader could not load \u2014 check signal')); };
+    document.head.appendChild(sc);
+  });
+  return _tessLoad;
+}
+// Crop the live frame to the on-screen card box (video is object-fit:cover).
+function camCaptureCropped() {
+  const v = document.getElementById('camVideo'), vf = document.getElementById('camFinder');
+  const full = () => { const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0); return c; };
+  const vr = v.getBoundingClientRect(), fr = vf.getBoundingClientRect();
+  if (!vr.width || !vr.height) return full();
+  const scale = Math.max(vr.width / v.videoWidth, vr.height / v.videoHeight);
+  const offX = (v.videoWidth * scale - vr.width) / 2, offY = (v.videoHeight * scale - vr.height) / 2;
+  const cx = Math.max(0, (fr.left - vr.left + offX) / scale), cy = Math.max(0, (fr.top - vr.top + offY) / scale);
+  const cw = Math.min(v.videoWidth - cx, fr.width / scale), ch = Math.min(v.videoHeight - cy, fr.height / scale);
+  if (cw <= 0 || ch <= 0) return full();
+  const c = document.createElement('canvas');
+  c.width = Math.round(cw); c.height = Math.round(ch);
+  c.getContext('2d').drawImage(v, cx, cy, cw, ch, 0, 0, c.width, c.height);
+  return c;
+}
+// Upscale small captures, then greyscale + contrast stretch (adapts to the lighting).
+function prepCardImage(src) {
+  const minW = 1400, maxW = 2400;
+  let w = src.width, h = src.height;
+  const k = w < minW ? minW / w : (w > maxW ? maxW / w : 1);
+  const c = document.createElement('canvas');
+  c.width = Math.round(w * k); c.height = Math.round(h * k);
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, 0, 0, c.width, c.height);
+  const img = ctx.getImageData(0, 0, c.width, c.height), d = img.data;
+  let mn = 255, mx = 0;
+  for (let i = 0; i < d.length; i += 4) { const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; d[i] = g; if (g < mn) mn = g; if (g > mx) mx = g; }
+  const r = Math.max(1, mx - mn);
+  for (let i = 0; i < d.length; i += 4) { const g = (d[i] - mn) / r * 255; d[i] = d[i + 1] = d[i + 2] = g; }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+async function readCardImage(canvas, onProgress) {
+  await loadTesseract();
+  if (!_ocrWorker) {
+    onProgress('Loading card reader (first time only)\u2026');
+    _ocrWorker = await Tesseract.createWorker('eng', 1, {
+      logger: m => { if (m.status === 'recognizing text') onProgress('Reading card\u2026 ' + Math.round((m.progress || 0) * 100) + '%'); }
+    });
+    await _ocrWorker.setParameters({ tessedit_pageseg_mode: '11' });
+  }
+  const { data } = await _ocrWorker.recognize(canvas);
+  return (data && data.text) || '';
+}
+async function processCardCanvas(canvas) {
+  _camBusy = true;
+  stopCardCamera();
+  document.getElementById('camShutter').disabled = true;
+  document.getElementById('camHint').style.display = 'none';
+  camStatus('Reading card\u2026');
+  let text = '';
+  try { text = await readCardImage(prepCardImage(canvas), camStatus); }
+  catch (e) { showToast('\u26A0\uFE0F ' + (e.message || 'Could not read the card') + ' \u2014 type the details in'); }
+  _camBusy = false;
+  closeCardCamera();
+  const ta = document.getElementById('nlScanText');
+  ta.value = text.trim();
+  document.getElementById('scanBox').classList.add('open');
+  if (ta.value) fillFromCard(false);
+  else if (text !== '') showToast('No text found \u2014 try again closer, in good light');
+}
+function cardCameraShutter() {
+  if (_camBusy) return;
+  const v = document.getElementById('camVideo');
+  if (!_camStream || !v.videoWidth) { showToast('Camera not ready \u2014 or tap \uD83D\uDDBC\uFE0F to use a photo'); return; }
+  processCardCanvas(camCaptureCropped());
+}
+function cardCameraFile(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f || _camBusy) return;
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext('2d').drawImage(img, 0, 0);
+    URL.revokeObjectURL(img.src);
+    processCardCanvas(c);
+  };
+  img.onerror = () => showToast('Could not open that photo');
+  img.src = URL.createObjectURL(f);
+}
+
 function fillFromCard(manual) {
-  clearTimeout(_cardScanTimer);
   const text = document.getElementById('nlScanText').value;
   if (!text.trim()) { if (manual) showToast('Scan or paste the card text first'); return; }
   const r = parseCardText(text);
@@ -3392,7 +3546,9 @@ function parseCardText(text) {
   const out = { name:'', role:'', company:'', email:'', mobile:'', office:'', website:'', street:'', suburb:'', state:'', postcode:'' };
   let lines = (text || '').replace(/\r/g, '').split('\n')
     .flatMap(l => l.split(/\s+[|\u2022\u00b7\u2013\u2014]\s+|\s{3,}/))
-    .map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    .map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean)
+    // v2.4: drop OCR junk (stray marks, logo fragments)
+    .filter(l => (l.match(/[a-z0-9]/gi) || []).length >= 3 && (l.match(/[^a-z0-9\s@.,&'()+\-\/:]/gi) || []).length <= l.length * 0.25);
   const used = new Set();
   // Email
   lines.forEach((l, i) => {
